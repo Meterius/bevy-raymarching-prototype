@@ -406,6 +406,7 @@ dependencies = [
  "bevy",
  "bevy_editor_pls",
  "bevy_flycam",
+ "bytemuck",
 ]
 
 [[package]]
