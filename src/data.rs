@@ -1,4 +1,4 @@
-use crate::renderer::RayMarcherCamera;
+use crate::renderer::{RayMarcherCamera, RENDER_TEXTURE_SIZE};
 use bevy::prelude::*;
 use bevy::render::extract_resource::ExtractResource;
 use bevy::render::render_resource::ShaderType;
@@ -10,6 +10,7 @@ const DRAW_GIZMOS: bool = false;
 #[reflect(Resource)]
 pub struct RayMarcherFrameData {
     time: f32,
+    texture_size: Vec2,
     screen_size: Vec2,
     aspect_ratio: f32,
     cam_unit_plane_dist: f32,
@@ -25,7 +26,10 @@ pub struct RayMarcherDataPlugin {}
 impl Plugin for RayMarcherDataPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<RayMarcherFrameData>()
-            .insert_resource(RayMarcherFrameData::default())
+            .insert_resource(RayMarcherFrameData {
+                texture_size: Vec2::new(RENDER_TEXTURE_SIZE.0 as _, RENDER_TEXTURE_SIZE.1 as _),
+                ..default()
+            })
             .add_systems(PostUpdate, update_frame_data);
     }
 }

@@ -1,5 +1,20 @@
 const PI = 3.1415926535897932384626433832795028841971693993751058209749445923078164062;
 
+fn hash(value: u32) -> u32 {
+    var state = value;
+    state = state ^ 2747636419u;
+    state = state * 2654435769u;
+    state = state ^ state >> 16u;
+    state = state * 2654435769u;
+    state = state ^ state >> 16u;
+    state = state * 2654435769u;
+    return state;
+}
+
+fn randomFloat(value: u32) -> f32 {
+    return f32(hash(value)) / 4294967295.0;
+}
+
 fn max_comp3(v: vec3<f32>) -> f32 {
     return max(v.x, max(v.y, v.z));
 }

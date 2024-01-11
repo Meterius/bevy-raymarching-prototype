@@ -15,7 +15,7 @@ use bevy::{
 };
 use std::borrow::Cow;
 
-const SIZE: (u32, u32) = (2560, 1440);
+pub const RENDER_TEXTURE_SIZE: (u32, u32) = (2560, 1440);
 const WORKGROUP_SIZE: u32 = 8;
 
 #[derive(Debug, Clone, Default, Component)]
@@ -40,8 +40,8 @@ struct RayMarcherBindGroup(BindGroup);
 pub fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     let mut image = Image::new_fill(
         Extent3d {
-            width: SIZE.0,
-            height: SIZE.1,
+            width: RENDER_TEXTURE_SIZE.0,
+            height: RENDER_TEXTURE_SIZE.1,
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
@@ -56,7 +56,10 @@ pub fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
         SpriteBundle {
             sprite: Sprite {
                 color: Color::rgba(1.0, 1.0, 1.0, 1.0),
-                custom_size: Some(Vec2::new(SIZE.0 as f32, SIZE.1 as f32)),
+                custom_size: Some(Vec2::new(
+                    RENDER_TEXTURE_SIZE.0 as f32,
+                    RENDER_TEXTURE_SIZE.1 as f32,
+                )),
                 ..default()
             },
             texture: image.clone(),
@@ -84,8 +87,8 @@ pub fn scale_target_to_screen(
     window: Query<&Window, With<PrimaryWindow>>,
 ) {
     sprite.single_mut().scale = Vec2::new(
-        window.single().width() / (SIZE.0 as f32),
-        window.single().height() / (SIZE.1 as f32),
+        window.single().width() / (RENDER_TEXTURE_SIZE.0 as f32),
+        window.single().height() / (RENDER_TEXTURE_SIZE.1 as f32),
     )
     .extend(1.0);
 }
@@ -185,7 +188,7 @@ impl FromWorld for RayMarcherPipeline {
 
         let shader = world
             .resource::<AssetServer>()
-            .load("shaders/ray_marcher.wgsl");
+            .load("shaders/renderer.wgsl");
 
         let pipeline_cache = world.resource::<PipelineCache>();
         let init_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
@@ -288,14 +291,22 @@ impl render_graph::Node for RayMarcherNode {
                     .get_compute_pipeline(pipeline.init_pipeline)
                     .unwrap();
                 pass.set_pipeline(init_pipeline);
-                pass.dispatch_workgroups(SIZE.0 / WORKGROUP_SIZE, SIZE.1 / WORKGROUP_SIZE, 1);
+                pass.dispatch_workgroups(
+                    RENDER_TEXTURE_SIZE.0 / WORKGROUP_SIZE,
+                    RENDER_TEXTURE_SIZE.1 / WORKGROUP_SIZE,
+                    1,
+                );
             }
             RayMarcherState::Update => {
                 let update_pipeline = pipeline_cache
                     .get_compute_pipeline(pipeline.update_pipeline)
                     .unwrap();
                 pass.set_pipeline(update_pipeline);
-                pass.dispatch_workgroups(SIZE.0 / WORKGROUP_SIZE, SIZE.1 / WORKGROUP_SIZE, 1);
+                pass.dispatch_workgroups(
+                    RENDER_TEXTURE_SIZE.0 / WORKGROUP_SIZE,
+                    RENDER_TEXTURE_SIZE.1 / WORKGROUP_SIZE,
+                    1,
+                );
             }
         }
 

@@ -1,12 +1,14 @@
 #import "shaders/compiled/utils.wgsl"::{PI, max_comp3, euclid_mod, smooth_min, wrap, wrap_reflect}
 #import "shaders/compiled/color.wgsl"::{color_map_default, color_map_a}
 #import "shaders/compiled/phong_reflection_model.wgsl"::{PhongReflectionMaterial, mix_material, phong_reflect_color}
+#import "shaders/compiled/signed_distance.wgsl"::{sdSphere, sdUnion, sdSmoothUnion}
 
 @group(0) @binding(0) var texture: texture_storage_2d<rgba8unorm, read_write>;
 @group(0) @binding(1) var<uniform> frame: RayMarcherFrameData;
 
 struct RayMarcherFrameData {
     time: f32,
+    texture_size: vec2<f32>,
     screen_size: vec2<f32>,
     aspect_ratio: f32,
     cam_unit_plane_dist: f32,
@@ -18,34 +20,17 @@ struct RayMarcherFrameData {
 
 //
 
-const texture_size: vec2<i32> = vec2<i32>(2560, 1440);
-
 const ray_marcher_max_steps = 100;
 const ray_marcher_hit_cutoff_dist = 0.01;
 const scene_cutoff_dist = 1000.0;
 const pixel_sampling_rate = 1;
-
-fn hash(value: u32) -> u32 {
-    var state = value;
-    state = state ^ 2747636419u;
-    state = state * 2654435769u;
-    state = state ^ state >> 16u;
-    state = state * 2654435769u;
-    state = state ^ state >> 16u;
-    state = state * 2654435769u;
-    return state;
-}
-
-fn randomFloat(value: u32) -> f32 {
-    return f32(hash(value)) / 4294967295.0;
-}
 
 fn invocationIdToTextureCoord(invocation_id: vec3<u32>) -> vec2<i32> {
     return vec2<i32>(i32(invocation_id.x), i32(invocation_id.y));
 }
 
 fn textureCoordToViewportCoord(texture_coord: vec2<i32>) -> vec2<f32> {
-    let flipped = vec2<f32>(2.0) * vec2<f32>(texture_coord) / vec2<f32>(texture_size) - vec2<f32>(1.0);
+    let flipped = vec2<f32>(2.0) * vec2<f32>(texture_coord) / vec2<f32>(frame.texture_size) - vec2<f32>(1.0);
     return flipped * vec2<f32>(1.0, -1.0);
 }
 
@@ -57,108 +42,10 @@ fn viewportCoordToRayDir(viewport_coord: vec2<f32>) -> vec3<f32> {
     );
 }
 
-// SD Primitives
-
-fn sdOctahedron(p: vec3<f32>, op: vec3<f32>, s: f32) -> f32 {
-    let q = abs(p - op);
-    let m = q.x + q.y + q.z - s;
-
-    var t = vec3<f32>(0.0);
-
-    if (3.0 * q.x < m) {
-        t = vec3<f32>(q.x, q.y, q.z);
-    } else if (3.0 * q.y < m) {
-        t = vec3<f32>(q.y, q.z, q.x);
-    } else if (3.0 * q.z < m) {
-        t = vec3<f32>(q.z, q.x, q.y);
-    } else {
-        return m * 0.57735027;
-    }
-
-    let k = clamp(0.5 * (t.z - t.y + s), 0.0, s);
-    return length(vec3<f32>(t.x, t.y - s + k, t.z - k));
-}
-
-fn sdOctahedronApprox(p: vec3<f32>, op: vec3<f32>, s: f32) -> f32 {
-    let q = abs(p - op);
-    return (q.x+q.y+q.z-s)*0.57735027;
-}
-
-fn sdSphere(p: vec3<f32>, sp: vec3<f32>, r: f32) -> f32 {
-    return length(p - sp) - r;
-}
-
-fn sdBox(p: vec3<f32>, bp: vec3<f32>, bs: vec3<f32>) -> f32 {
-    let q = abs(p - bp) - bs;
-    let udst = length(max(q, vec3<f32>(0.0)));
-    let idst = max_comp3(min(q, vec3<f32>(0.0)));
-    return udst + idst;
-}
-
-fn sdUnitSphere(p: vec3<f32>) -> f32 {
-    return length(p) - 1.0;
-}
-
-// SD Operators
-
-fn sdPreTranslate(p: vec3<f32>, translation: vec3<f32>) -> vec3<f32> {
-    return p - translation;
-}
-
-fn sdPostTranslate(sd: f32, translation: vec3<f32>) -> f32 {
-    return sd;
-}
-
-fn sdPreScale(p: vec3<f32>, scale_origin: vec3<f32>, scale: vec3<f32>) -> vec3<f32> {
-    return (p - scale_origin) * scale + scale_origin;
-}
-
-fn sdPostScale(sd: f32, scale_origin: vec3<f32>, scale: vec3<f32>) -> f32 {
-    return sd / scale.x;
-}
-
-fn sdPreTransformUnit(p: vec3<f32>, translation: vec3<f32>, scale: vec3<f32>) -> vec3<f32> {
-    let p2 = sdPreScale(p, vec3<f32>(0.0), scale);
-    let p3 = sdPreTranslate(p, translation);
-    return p3;
-}
-
-fn sdPostTransformUnit(sd3: f32, translation: vec3<f32>, scale: vec3<f32>) -> f32 {
-    let sd2 = sdPostTranslate(sd3, translation);
-    let sd = sdPostScale(sd2, vec3<f32>(0.0), scale);
-    return sd;
-}
-
-fn sdPostUnion(sd1: f32, sd2: f32) -> f32 {
-    return min(sd1, sd2);
-}
-
-fn sdPostSmoothUnion(sd1: f32, sd2: f32, k: f32) -> f32 {
-    return smooth_min(sd1, sd2, k);
-}
-
-fn sdPostIntersect(sd1: f32, sd2: f32) -> f32 {
-    return max(sd1, sd2);
-}
-
-fn sdPostInverse(sd1: f32) -> f32 {
-    return -sd1;
-}
-
-fn sdPostDifference(sd1: f32, sd2: f32) -> f32 {
-    return max(sd1, -sd2);
-}
-
 // Scene
 
 fn sdScene(p: vec3<f32>) -> f32 {
     // sphere1
-
-    //let tSphere1 = vec3<f32>(0.0, 0.0, 3.0);
-    //let sSphere1 = vec3<f32>(4.0);
-    //let pSphere1 = sdPreTransformUnit(p, tSphere1, sSphere1);
-    //let sdSphere1 = sdPostTransformUnit(sdUnitSphere(pSphere1), tSphere1, sSphere1);
-    //let sdSphere1 = sdUnitSphere((p - vec3(0.0, 0.5, 0.0)));
 
     var q = p;
     q.x = wrap(q.x, -0.75, 0.75);

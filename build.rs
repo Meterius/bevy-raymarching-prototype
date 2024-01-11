@@ -84,7 +84,7 @@ impl FromStr for MacroFunc {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let re = Regex::new(r"^#macro_func(\w+)\(([\w\s,]*)\)\s+$").map_err(|_| "Invalid regex")?;
+        let re = Regex::new(r"^#macro_func (\w+)\((.*)\)\s+$").map_err(|_| "Invalid regex")?;
         let caps = re.captures(s).ok_or("Invalid macro function format")?;
 
         let name = caps
