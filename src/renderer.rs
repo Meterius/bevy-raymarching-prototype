@@ -1,4 +1,5 @@
 use crate::data::RayMarcherFrameData;
+use bevy::core_pipeline::clear_color::ClearColorConfig;
 use bevy::render::renderer::RenderQueue;
 use bevy::window::PrimaryWindow;
 use bevy::{
@@ -16,6 +17,9 @@ use std::borrow::Cow;
 
 const SIZE: (u32, u32) = (2560, 1440);
 const WORKGROUP_SIZE: u32 = 8;
+
+#[derive(Debug, Clone, Default, Component)]
+pub struct RayMarcherCamera {}
 
 #[derive(Resource)]
 pub struct RayMarcherBuffers {
@@ -51,6 +55,7 @@ pub fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     commands.spawn((
         SpriteBundle {
             sprite: Sprite {
+                color: Color::rgba(1.0, 1.0, 1.0, 1.0),
                 custom_size: Some(Vec2::new(SIZE.0 as f32, SIZE.1 as f32)),
                 ..default()
             },
@@ -59,7 +64,17 @@ pub fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
         },
         RayMarcherTargetSprite::default(),
     ));
-    commands.spawn(Camera2dBundle::default());
+    commands.spawn(Camera2dBundle {
+        camera: Camera {
+            order: 1,
+            ..default()
+        },
+        camera_2d: Camera2d {
+            clear_color: ClearColorConfig::None,
+            ..default()
+        },
+        ..default()
+    });
 
     commands.insert_resource(RayMarcherTargetImage(image));
 }
@@ -70,7 +85,7 @@ pub fn scale_target_to_screen(
 ) {
     sprite.single_mut().scale = Vec2::new(
         window.single().width() / (SIZE.0 as f32),
-        window.single().width() / (SIZE.0 as f32),
+        window.single().height() / (SIZE.1 as f32),
     )
     .extend(1.0);
 }
@@ -163,9 +178,15 @@ impl FromWorld for RayMarcherPipeline {
                         },
                     ],
                 });
+
+        let _ = world
+            .resource::<AssetServer>()
+            .load::<Shader>("shaders/utils.wgsl");
+
         let shader = world
             .resource::<AssetServer>()
             .load("shaders/ray_marcher.wgsl");
+
         let pipeline_cache = world.resource::<PipelineCache>();
         let init_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
             label: None,
@@ -293,6 +314,7 @@ impl Plugin for RayMarcherRenderPlugin {
         app.add_plugins(ExtractResourcePlugin::<RayMarcherFrameData>::default());
 
         app.add_systems(Startup, setup);
+        app.add_systems(Update, scale_target_to_screen);
 
         let render_app = app.sub_app_mut(RenderApp);
 

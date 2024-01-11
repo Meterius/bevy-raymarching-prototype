@@ -14,10 +14,10 @@ fn main() {
         EditorPlugin::default(),
         data::RayMarcherDataPlugin::default(),
         renderer::RayMarcherRenderPlugin::default(),
-        // NoCameraPlayerPlugin,
+        NoCameraPlayerPlugin,
     ));
 
-    // app.add_systems(Startup, example_scene::setup_scene);
+    app.add_systems(Startup, example_scene::setup_scene);
 
     app.run();
 }
