@@ -1,4 +1,4 @@
-#import "shaders/compiled/utils.wgsl"::{max_comp3, smooth_min}
+#import "shaders/compiled/utils.wgsl"::{max_comp3, smooth_min, euclid_mod, max3, max4, max5, min3, min4, min5}
 
 // SD Primitives
 
@@ -40,6 +40,64 @@ fn sdBox(p: vec3<f32>, bp: vec3<f32>, bs: vec3<f32>) -> f32 {
 
 fn sdUnitSphere(p: vec3<f32>) -> f32 {
     return length(p) - 1.0;
+}
+
+fn sdVertexPlane(p: vec3<f32>, n: vec3<f32>, d: f32) -> f32 {
+    return dot(p, n) - d;
+}
+
+fn sdVertexPlaneB(p: vec3<f32>, n: vec3<f32>, b: vec3<f32>) -> f32 {
+    return dot(p, n) - dot(b, n);
+}
+
+// SD Complexes
+
+const REC_TETR_ITER: i32 = 10;
+const REC_TETR_SCALE: f32 = 1.0;
+const REC_TETR_OFFSET: vec3<f32> = vec3<f32>(1.0, 1.0, 1.0);
+
+fn sdTetrahedron(p: vec3<f32>) -> f32 {
+    var q = p;
+
+    var i = 1;
+    for (; i <= REC_TETR_ITER; i += 1) {
+        q = q * vec3<f32>(2.0) - vec3<f32>(1.0);
+        q = sdPreMirrorB(q, normalize(vec3<f32>(1.0, 0.0, -1.0)), vec3<f32>(0.0));
+        q = sdPreMirrorB(q, normalize(vec3<f32>(-1.0, 1.0, 0.0)), vec3<f32>(0.0, 0.0, 0.0));
+        q = sdPreMirrorB(q, normalize(vec3<f32>(1.0, 0.0, 1.0)), vec3<f32>(-1.0, 0.0, -1.0));
+    }
+
+    let a = max4(
+        sdVertexPlaneB(q, normalize(vec3<f32>(1.0, 1.0, -1.0)), vec3<f32>(1.0, 1.0, 1.0)),
+        sdVertexPlaneB(q, normalize(vec3<f32>(-1.0, 1.0, 1.0)), vec3<f32>(1.0, 1.0, 1.0)),
+        sdVertexPlaneB(q, normalize(vec3<f32>(1.0, -1.0, 1.0)), vec3<f32>(1.0, -1.0, -1.0)),
+        sdVertexPlaneB(q, normalize(vec3<f32>(-1.0, -1.0, -1.0)), vec3<f32>(1.0, -1.0, -1.0)),
+    ) * pow(2.0, -f32(REC_TETR_ITER));
+
+    return a;
+
+    /*let b = min5(
+        sdSphere(p, vec3<f32>(0.0, 0.0, 0.0), 0.2),
+        sdSphere(p, vec3<f32>(1.0, 1.0, 1.0), 0.1),
+        sdSphere(p, vec3<f32>(-1.0, -1.0, 1.0), 0.1),
+        sdSphere(p, vec3<f32>(1.0, -1.0, -1.0), 0.1),
+        sdSphere(p, vec3<f32>(-1.0, 1.0, -1.0), 0.1),
+    );
+
+    return min(a, b);*/
+}
+
+fn sdPreMirrorB(p: vec3<f32>, n: vec3<f32>, b: vec3<f32>) -> vec3<f32> {
+    let dist = sdVertexPlaneB(p, n, b);
+    if (dist <= 0.0) {
+        return p - 2.0 * dist * n;
+    } else {
+        return p;
+    }
+}
+
+fn sdRecursiveTetrahedron(p: vec3<f32>) -> f32 {
+    return sdTetrahedron(p);
 }
 
 // SD Operators

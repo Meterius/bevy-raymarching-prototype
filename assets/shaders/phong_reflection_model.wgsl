@@ -29,13 +29,8 @@ fn phong_reflect_color(
     hit: vec3<f32>,
     normal: vec3<f32>,
     material: PhongReflectionMaterial,
+    light: PhongReflectionLight,
 ) -> vec3<f32> {
-    let light = PhongReflectionLight(
-        origin,
-        vec3<f32>(1.0),
-        vec3<f32>(1.0),
-    );
-
     var color = material.color * material.k_a * I_A;
     let v = normalize(origin - hit);
 

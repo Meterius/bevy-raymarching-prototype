@@ -15,6 +15,30 @@ fn randomFloat(value: u32) -> f32 {
     return f32(hash(value)) / 4294967295.0;
 }
 
+fn max3(v1: f32, v2: f32, v3: f32) -> f32 {
+    return max(v1, max(v2, v3));
+}
+
+fn max4(v1: f32, v2: f32, v3: f32, v4: f32) -> f32 {
+    return max(v1, max(v2, max(v3, v4)));
+}
+
+fn max5(v1: f32, v2: f32, v3: f32, v4: f32, v5: f32) -> f32 {
+    return max(v1, max(v2, max(v3, max(v4, v5))));
+}
+
+fn min3(v1: f32, v2: f32, v3: f32) -> f32 {
+    return min(v1, min(v2, v3));
+}
+
+fn min4(v1: f32, v2: f32, v3: f32, v4: f32) -> f32 {
+    return min(v1, min(v2, min(v3, v4)));
+}
+
+fn min5(v1: f32, v2: f32, v3: f32, v4: f32, v5: f32) -> f32 {
+    return min(v1, min(v2, min(v3, min(v4, v5))));
+}
+
 fn max_comp3(v: vec3<f32>) -> f32 {
     return max(v.x, max(v.y, v.z));
 }
