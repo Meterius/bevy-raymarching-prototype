@@ -1,6 +1,6 @@
 use bevy::diagnostic::{EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
-use bevy::window::WindowResolution;
+use bevy::window::{PresentMode, WindowResolution};
 use bevy_editor_pls::EditorPlugin;
 use bevy_flycam::NoCameraPlayerPlugin;
 
@@ -14,6 +14,7 @@ fn main() {
     app.insert_resource(Msaa::Sample8).add_plugins((
         DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
+                present_mode: PresentMode::AutoVsync,
                 resolution: WindowResolution::new(1920., 1080.),
                 ..default()
             }),

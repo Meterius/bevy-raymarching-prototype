@@ -8,20 +8,34 @@ use bevy::window::PrimaryWindow;
 
 const DRAW_GIZMOS: bool = false;
 
-#[derive(Copy, Clone, Debug, Default, Resource, Reflect, ExtractResource, ShaderType)]
+#[derive(Clone, Debug, Default, Resource, Reflect, ExtractResource, ShaderType)]
 #[reflect(Resource)]
 pub struct RayMarcherFrameData {
-    time: f32,
-    texture_size: Vec2,
-    screen_size: Vec2,
-    aspect_ratio: f32,
-    cam_unit_plane_dist: f32,
-    cam_pos: Vec3,
-    cam_forward: Vec3,
-    cam_up: Vec3,
-    cam_right: Vec3,
-    sun_dir: Vec3,
-    world_scale: f32,
+    pub time: f32,
+    pub texture_size: Vec2,
+    pub screen_size: Vec2,
+    pub aspect_ratio: f32,
+    pub cam_unit_plane_dist: f32,
+    pub cam_pos: Vec3,
+    pub cam_forward: Vec3,
+    pub cam_up: Vec3,
+    pub cam_right: Vec3,
+    pub sun_dir: Vec3,
+    pub world_scale: f32,
+}
+
+#[derive(Clone, Debug, Default, Resource, Reflect, ExtractResource, ShaderType)]
+#[reflect(Resource)]
+pub struct SdBox {
+    pub position: Vec3,
+    pub size: Vec3,
+}
+
+#[derive(Clone, Debug, Default, Resource, Reflect, ExtractResource, ShaderType)]
+#[reflect(Resource)]
+pub struct SdScene {
+    #[size(runtime)]
+    pub boxes: Vec<SdBox>,
 }
 
 #[derive(Default)]

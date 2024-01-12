@@ -1,4 +1,4 @@
-use crate::data::RayMarcherFrameData;
+use crate::data::{RayMarcherFrameData, SdBox, SdScene};
 use bevy::core_pipeline::clear_color::ClearColorConfig;
 use bevy::render::renderer::RenderQueue;
 use bevy::window::PrimaryWindow;
@@ -14,6 +14,7 @@ use bevy::{
     },
 };
 use std::borrow::Cow;
+use std::f32::consts::PI;
 
 pub const RENDER_TEXTURE_SIZE: (u32, u32) = (2560, 1440);
 const WORKGROUP_SIZE: u32 = 8;
@@ -24,6 +25,7 @@ pub struct RayMarcherCamera {}
 #[derive(Resource)]
 pub struct RayMarcherBuffers {
     frame_data_buffer: UniformBuffer<RayMarcherFrameData>,
+    scene_buffer: StorageBuffer<SdScene>,
 }
 
 #[derive(Debug, Clone, Default, Component)]
@@ -107,10 +109,45 @@ fn setup_buffers(
         buffers
             .frame_data_buffer
             .write_buffer(&render_device, &render_queue);
+
+        buffers.scene_buffer.set(SdScene {
+            boxes: vec![
+                SdBox {
+                    position: Vec3::new(10.0, 5.0 + (frame_data.time * 2.0 * PI / 5.0).sin(), 3.0),
+                    size: Vec3::new(2.0, 0.5, 1.0),
+                },
+                SdBox {
+                    position: Vec3::new(-5.0, 5.0, 3.0),
+                    size: Vec3::new(3.0, 0.5, 1.0),
+                },
+            ],
+        });
+
+        buffers
+            .scene_buffer
+            .write_buffer(&render_device, &render_queue);
     } else {
         let mut frame_data_buffer = UniformBuffer::from(frame_data.clone());
         frame_data_buffer.write_buffer(&render_device, &render_queue);
-        commands.insert_resource(RayMarcherBuffers { frame_data_buffer });
+
+        let mut scene_buffer = StorageBuffer::from(SdScene {
+            boxes: vec![
+                SdBox {
+                    position: Vec3::new(10.0, 5.0, 3.0),
+                    size: Vec3::new(2.0, 0.5, 1.0),
+                },
+                SdBox {
+                    position: Vec3::new(-5.0, 5.0, 3.0),
+                    size: Vec3::new(3.0, 0.5, 1.0),
+                },
+            ],
+        });
+        scene_buffer.write_buffer(&render_device, &render_queue);
+
+        commands.insert_resource(RayMarcherBuffers {
+            frame_data_buffer,
+            scene_buffer,
+        });
     }
 }
 
@@ -135,6 +172,10 @@ fn prepare_bind_group(
             BindGroupEntry {
                 binding: 1,
                 resource: buffers.frame_data_buffer.binding().unwrap(),
+            },
+            BindGroupEntry {
+                binding: 2,
+                resource: buffers.scene_buffer.binding().unwrap(),
             },
         ],
     );
@@ -174,6 +215,16 @@ impl FromWorld for RayMarcherPipeline {
                             visibility: ShaderStages::COMPUTE,
                             ty: BindingType::Buffer {
                                 ty: BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: ShaderStages::COMPUTE,
+                            ty: BindingType::Buffer {
+                                ty: BufferBindingType::Storage { read_only: true },
                                 has_dynamic_offset: false,
                                 min_binding_size: None,
                             },

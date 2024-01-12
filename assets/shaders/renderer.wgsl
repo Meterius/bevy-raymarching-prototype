@@ -1,10 +1,11 @@
-#import "shaders/compiled/utils.wgsl"::{PI, max_comp3, euclid_mod, smooth_min, wrap, wrap_reflect, min4, min5, min3, wrap_cell}
+#import "shaders/compiled/utils.wgsl"::{PI, max_comp3, euclid_mod, smooth_min, wrap, wrap_reflect, min4, min5, min3, wrap_cell, MAX_POSITIVE_F32}
 #import "shaders/compiled/color.wgsl"::{color_map_default, color_map_a, color_map_temp, hdr_map_aces_tone}
 #import "shaders/compiled/phong_reflection_model.wgsl"::{PhongReflectionMaterial, mix_material, phong_reflect_light, PhongReflectionLight}
 #import "shaders/compiled/signed_distance.wgsl"::{sdSphere, sdUnion, sdPostSmoothUnion, sdRecursiveTetrahedron, sdBox, sdPreCheapBend, sdPreMirrorB}
 
 @group(0) @binding(0) var texture: texture_storage_2d<rgba8unorm, read_write>;
 @group(0) @binding(1) var<uniform> frame: RayMarcherFrameData;
+@group(0) @binding(2) var<storage> scene: SdScene;
 
 struct RayMarcherFrameData {
     time: f32,
@@ -23,6 +24,26 @@ struct RayMarcherFrameData {
     sun_dir: vec3<f32>,
 
     world_scale: f32,
+}
+
+struct SdBox {
+    position: vec3<f32>,
+    size: vec3<f32>,
+}
+
+struct SdScene {
+    boxes: array<SdBox>,
+}
+
+fn sdSceneFunc(p: vec3<f32>) -> f32 {
+    var sd = MAX_POSITIVE_F32 / 16.0;
+
+    let box_count = i32(arrayLength(&scene.boxes));
+    for (var i = 0; i < box_count; i += 1) {
+        sd = min(sd, sdBox(p, scene.boxes[i].position, scene.boxes[i].size / 2.0));
+    }
+
+    return sd;
 }
 
 //
@@ -127,7 +148,9 @@ fn sdScene(p: vec3<f32>) -> SdSceneData {
 
     let sd_plane = q.y;
 
-    return SdSceneData(min(
+    return SdSceneData(min(min(sd_axes, sd_plane), sdSceneFunc(p)), 0.0);
+
+    /*return SdSceneData(min(
         sdPostSmoothUnion(
             sd_tetrahedron,
             sdPostSmoothUnion(
@@ -142,7 +165,7 @@ fn sdScene(p: vec3<f32>) -> SdSceneData {
             20.0,
         ),
         sd_axes,
-    ), sd_tetrahedron_data.y);
+    ), sd_tetrahedron_data.y);*/
 }
 
 fn sdSceneMaterial(p: vec3<f32>, base_color: vec3<f32>) -> PhongReflectionMaterial {
