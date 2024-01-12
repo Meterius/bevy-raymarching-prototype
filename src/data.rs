@@ -1,6 +1,4 @@
 use crate::renderer::{RayMarcherCamera, RENDER_TEXTURE_SIZE};
-use bevy::input::keyboard::KeyboardInput;
-use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 use bevy::render::extract_resource::ExtractResource;
 use bevy::render::render_resource::ShaderType;
@@ -60,21 +58,21 @@ fn update_frame_data(
     camera: Query<(&Camera, &GlobalTransform), With<RayMarcherCamera>>,
     time: Res<Time>,
     mut frame_data: ResMut<RayMarcherFrameData>,
-    mut keyboard_input: Res<Input<KeyCode>>,
+    keyboard_input: Res<Input<KeyCode>>,
 ) {
-    // Scroll
+    // Sun Rotation
 
-    static MINIMAL_SCALE: f32 = 0.25;
-    static MAXIMAL_SCALE: f32 = 20.0;
-
-    let rx = keyboard_input.pressed(KeyCode::Numpad6) as i32
+    let drx = keyboard_input.pressed(KeyCode::Numpad6) as i32
         - keyboard_input.pressed(KeyCode::Numpad4) as i32;
-    let ry = keyboard_input.pressed(KeyCode::Numpad8) as i32
+    let dry = keyboard_input.pressed(KeyCode::Numpad8) as i32
         - keyboard_input.pressed(KeyCode::Numpad2) as i32;
-    let r = Vec2::new(rx as _, ry as _).normalize_or_zero();
+    let dr = Vec2::new(drx as _, dry as _).normalize_or_zero() * 0.01;
 
-    frame_data.sun_dir =
-        Quat::from_rotation_y(-r.x * 0.2 * time.delta_seconds()).mul_vec3(frame_data.sun_dir);
+    frame_data.sun_dir = (
+        Quat::from_axis_angle(Vec3::Y, -dr.x)
+        * Quat::from_axis_angle(Vec3::Y.cross(frame_data.sun_dir), -dr.y)
+        * frame_data.sun_dir
+    ).normalize();
 
     //
 

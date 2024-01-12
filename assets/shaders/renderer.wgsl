@@ -150,22 +150,22 @@ fn sdScene(p: vec3<f32>) -> SdSceneData {
 
     return SdSceneData(min(min(sd_axes, sd_plane), sdSceneFunc(p)), 0.0);
 
-    /*return SdSceneData(min(
-        sdPostSmoothUnion(
-            sd_tetrahedron,
-            sdPostSmoothUnion(
-                sdPostSmoothUnion(
-                    sd_plane,
-                    sd_large_columns,
-                    60.0,
-                ),
-                sd_columns,
-                5.0,
-            ),
-            20.0,
-        ),
-        sd_axes,
-    ), sd_tetrahedron_data.y);*/
+    // return SdSceneData(min(
+    //     sdPostSmoothUnion(
+    //         sd_tetrahedron,
+    //         sdPostSmoothUnion(
+    //             sdPostSmoothUnion(
+    //                 sd_plane,
+    //                 sd_large_columns,
+    //                 60.0,
+    //             ),
+    //             sd_columns,
+    //             5.0,
+    //         ),
+    //         20.0,
+    //     ),
+    //     sd_axes,
+    // ), sd_tetrahedron_data.y);
 }
 
 fn sdSceneMaterial(p: vec3<f32>, base_color: vec3<f32>) -> PhongReflectionMaterial {
@@ -382,7 +382,7 @@ fn renderHit(ray: Ray, hit: RayMarchHit) -> vec3<f32> {
             length(
                 hit.pos + vec3<f32>(30.0 * sin(frame.time * 0.1 + 20.75), 40.0 * sin(frame.time * 0.25 + 10.75), 50.0 * sin(frame.time * 0.5 + 100.75))
             ) * 0.001 + (f32(hit.step_depth) / f32(RAY_MARCHING_MAX_STEP_DEPTH)) * 0.1
-        ) * 10.0;
+        ) * 5.0;
 
         let phong_light = phong_reflect_light(
             frame.cam_pos, hit.pos, normal,
@@ -396,7 +396,7 @@ fn renderHit(ray: Ray, hit: RayMarchHit) -> vec3<f32> {
         let shading_light = shadow * phong_light;
         let light = (shading_light * 0.99 + 0.01 * ao);
 
-        color = base_material_color * 2.0 * pow(light, 0.8);
+        color = base_material_color * 1.0 * pow(light, 0.8);
 
         // Fog
 
