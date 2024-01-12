@@ -1,4 +1,5 @@
 use crate::renderer::{RayMarcherCamera, RENDER_TEXTURE_SIZE};
+use bevy::input::keyboard::KeyboardInput;
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 use bevy::render::extract_resource::ExtractResource;
@@ -19,6 +20,7 @@ pub struct RayMarcherFrameData {
     cam_forward: Vec3,
     cam_up: Vec3,
     cam_right: Vec3,
+    sun_dir: Vec3,
     world_scale: f32,
 }
 
@@ -31,6 +33,7 @@ impl Plugin for RayMarcherDataPlugin {
             .insert_resource(RayMarcherFrameData {
                 texture_size: Vec2::new(RENDER_TEXTURE_SIZE.0 as _, RENDER_TEXTURE_SIZE.1 as _),
                 world_scale: 1.0,
+                sun_dir: Vec3::new(0.5, 1.0, 3.0).normalize(),
                 ..default()
             })
             .add_systems(PostUpdate, update_frame_data);
@@ -43,23 +46,21 @@ fn update_frame_data(
     camera: Query<(&Camera, &GlobalTransform), With<RayMarcherCamera>>,
     time: Res<Time>,
     mut frame_data: ResMut<RayMarcherFrameData>,
-    mut ev_scroll: EventReader<MouseWheel>,
+    mut keyboard_input: Res<Input<KeyCode>>,
 ) {
     // Scroll
 
     static MINIMAL_SCALE: f32 = 0.25;
     static MAXIMAL_SCALE: f32 = 20.0;
 
-    use bevy::input::mouse::MouseScrollUnit;
-    for ev in ev_scroll.read() {
-        let y = match ev.unit {
-            MouseScrollUnit::Line => ev.y / 2.0,
-            MouseScrollUnit::Pixel => ev.y / 100.0,
-        };
+    let rx = keyboard_input.pressed(KeyCode::Numpad6) as i32
+        - keyboard_input.pressed(KeyCode::Numpad4) as i32;
+    let ry = keyboard_input.pressed(KeyCode::Numpad8) as i32
+        - keyboard_input.pressed(KeyCode::Numpad2) as i32;
+    let r = Vec2::new(rx as _, ry as _).normalize_or_zero();
 
-        frame_data.world_scale =
-            (frame_data.world_scale * 0.8f32.powf(-y)).clamp(MINIMAL_SCALE, MAXIMAL_SCALE);
-    }
+    frame_data.sun_dir =
+        Quat::from_rotation_y(-r.x * 0.2 * time.delta_seconds()).mul_vec3(frame_data.sun_dir);
 
     //
 

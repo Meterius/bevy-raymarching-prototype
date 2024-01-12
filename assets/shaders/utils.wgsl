@@ -54,8 +54,16 @@ fn smooth_min(x1: f32, x2: f32, k: f32) -> f32 {
     return min(x1, x2) - h * h * h * k * (1.0 / 6.0);
 }
 
+fn euclid_div(x: f32, n: f32) -> f32 {
+    return floor(x / n) * n;
+}
+
 fn euclid_mod(x: f32, n: f32) -> f32 {
     return x - floor(x / n) * n;
+}
+
+fn wrap_cell(x: f32, lower: f32, upper: f32) -> f32 {
+    return euclid_div(x - lower, (upper - lower));
 }
 
 fn wrap(x: f32, lower: f32, upper: f32) -> f32 {

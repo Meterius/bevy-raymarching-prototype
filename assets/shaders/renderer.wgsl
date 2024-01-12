@@ -1,4 +1,4 @@
-#import "shaders/compiled/utils.wgsl"::{PI, max_comp3, euclid_mod, smooth_min, wrap, wrap_reflect, min4, min5, min3}
+#import "shaders/compiled/utils.wgsl"::{PI, max_comp3, euclid_mod, smooth_min, wrap, wrap_reflect, min4, min5, min3, wrap_cell}
 #import "shaders/compiled/color.wgsl"::{color_map_default, color_map_a, color_map_temp, hdr_map_aces_tone}
 #import "shaders/compiled/phong_reflection_model.wgsl"::{PhongReflectionMaterial, mix_material, phong_reflect_light, PhongReflectionLight}
 #import "shaders/compiled/signed_distance.wgsl"::{sdSphere, sdUnion, sdPostSmoothUnion, sdRecursiveTetrahedron, sdBox, sdPreCheapBend, sdPreMirrorB}
@@ -19,6 +19,8 @@ struct RayMarcherFrameData {
     cam_forward: vec3<f32>,
     cam_up: vec3<f32>,
     cam_right: vec3<f32>,
+
+    sun_dir: vec3<f32>,
 
     world_scale: f32,
 }
@@ -52,13 +54,42 @@ fn sdSceneAxes(p: vec3<f32>) -> f32 {
     );
 }
 
-fn sdSceneColumn(p: vec3<f32>) -> f32 {
-    return min4(
-        sdBox(p, vec3<f32>(0.0, 3.0, 0.0), vec3<f32>(0.5, 3.0, 0.5)),
-        sdBox(p, vec3<f32>(0.0, 5.0, 0.0), vec3<f32>(0.75, 0.15, 0.75)),
-        sdBox(p, vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(0.7, 1.0, 0.7)),
-        sdSphere(p, vec3<f32>(0.0, 8.0, 0.0), 0.5),
+fn sdSceneColumn(p: vec3<f32>, cell: vec3<f32>) -> f32 {
+    return sdPostSmoothUnion(
+        min3(
+            sdBox(p, vec3<f32>(0.0, 3.0, 0.0), vec3<f32>(0.5, 3.0, 0.5)),
+            sdBox(p, vec3<f32>(0.0, 5.0, 0.0), vec3<f32>(0.75, 0.15, 0.75)),
+            sdBox(p, vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(0.7, 1.0, 0.7)),
+        ),
+        sdSphere(p, vec3<f32>(0.0, 10.0 + (
+            2.0 * (
+                sin(2.0 * PI * (cell.x * 0.1 + frame.time) / 10.0)
+                + sin(2.0 * PI * (cell.z * 0.1 + frame.time * 4.0) / 15.0)
+            )
+        ), 0.0), 0.5),
+        1.1,
     );
+}
+
+fn sdSceneColumnPattern(p: vec3<f32>, grid_gap: vec2<f32>) -> f32 {
+    let q = p;
+    let columns_cell = vec3<f32>(
+        wrap_cell(q.x, -grid_gap.x, grid_gap.x),
+        q.y,
+        wrap_cell(q.z, -grid_gap.y, grid_gap.y),
+    );
+
+    let columns_wrapped_pos = vec3<f32>(
+        wrap(q.x, -grid_gap.x, grid_gap.x),
+        q.y,
+        wrap(q.z, -grid_gap.y, grid_gap.y),
+    );
+
+    return sdPostSmoothUnion(sdPostSmoothUnion(
+        sdSceneColumn(columns_wrapped_pos + vec3<f32>(2.0 * grid_gap.x, 0.0, 0.0), vec3<f32>(grid_gap, 1.0) * (columns_cell + vec3<f32>(1.0, 0.0, 0.0))),
+        sdSceneColumn(columns_wrapped_pos - vec3<f32>(2.0 * grid_gap.x, 0.0, 0.0), vec3<f32>(grid_gap, 1.0) * (columns_cell - vec3<f32>(1.0, 0.0, 0.0))),
+        2.0,
+    ), sdSceneColumn(columns_wrapped_pos, columns_cell * vec3<f32>(grid_gap, 1.0)), 4.0);
 }
 
 struct SdSceneData {
@@ -77,7 +108,7 @@ fn sdScene(p: vec3<f32>) -> SdSceneData {
         wrap(q.z, -tetrahedron_scale*2.0, tetrahedron_scale*2.0),
     ), q, 1.0);
 
-    let tetrahedron_translated_pos = tetrahedron_wrapped_pos - vec3<f32>(0.0, tetrahedron_scale, 0.0);
+    let tetrahedron_translated_pos = tetrahedron_wrapped_pos - vec3<f32>(0.0, tetrahedron_scale + 25.0, 0.0);
     let tetrahedron_scaled_pos = tetrahedron_translated_pos / tetrahedron_scale;
 
     let sd_tetrahedron_data = sdRecursiveTetrahedron(tetrahedron_scaled_pos);
@@ -85,13 +116,8 @@ fn sdScene(p: vec3<f32>) -> SdSceneData {
 
     // Columns
 
-    let columns_wrapped_pos = vec3<f32>(
-        wrap(q.x, -4.0, 4.0),
-        q.y,
-        wrap(q.z, -2.0, 2.0),
-    );
-
-    let sd_columns = sdSceneColumn(columns_wrapped_pos);
+    let sd_columns = sdSceneColumnPattern(q, vec2<f32>(1.0, 1.0));
+    let sd_large_columns = sdSceneColumnPattern(q / 30.0 + vec3<f32>(00.0, 0.0, 30.0), vec2<f32>(5.0 + sin(frame.time * 0.1) * 6.0, 10.0)) * 30.0;
 
     // Axes
 
@@ -101,10 +127,20 @@ fn sdScene(p: vec3<f32>) -> SdSceneData {
 
     let sd_plane = q.y;
 
-    return SdSceneData(min4(
-        sd_tetrahedron,
-        sd_columns,
-        sd_plane,
+    return SdSceneData(min(
+        sdPostSmoothUnion(
+            sd_tetrahedron,
+            sdPostSmoothUnion(
+                sdPostSmoothUnion(
+                    sd_plane,
+                    sd_large_columns,
+                    60.0,
+                ),
+                sd_columns,
+                5.0,
+            ),
+            20.0,
+        ),
         sd_axes,
     ), sd_tetrahedron_data.y);
 }
@@ -123,7 +159,7 @@ fn sdSceneMaterial(p: vec3<f32>, base_color: vec3<f32>) -> PhongReflectionMateri
         return PhongReflectionMaterial(color, 0.0, 0.0, 0.9, 1.0);
     }
 
-    return PhongReflectionMaterial(base_color, 0.0, 0.7, 0.05, 30.0);
+    return PhongReflectionMaterial(base_color, 0.3, 0.7, 0.05, 30.0);
 }
 
 const NORMAL_EPSILON = 0.001;
@@ -136,13 +172,11 @@ fn sdSceneNormal(p: vec3<f32>) -> vec3<f32> {
     ));
 }
 
-const SUN_DIR = vec3<f32>(0.5, 1.0, 3.0);
-
 // Ray Marching
 
-const RAY_MARCHING_MAX_STEP_DEPTH = 2000;
+const RAY_MARCHING_MAX_STEP_DEPTH = 4000;
 const RAY_MARCHER_COLLISION_DISTANCE = 0.0001;
-const RAY_MARCHER_MAX_DEPTH = 10000.0;
+const RAY_MARCHER_MAX_DEPTH = 1000000.0;
 
 const CUTOFF_REASON_NONE = 0u;
 const CUTOFF_REASON_DISTANCE = 1u;
@@ -236,7 +270,7 @@ fn rayMarchWith(ray: Ray, options: RayMarchOptions) -> RayMarchHit {
             );
         }
 
-        if (sd <= RAY_MARCHER_COLLISION_DISTANCE) {
+        if (sd <= RAY_MARCHER_COLLISION_DISTANCE + max(0.0, depth - 100.0) * (0.01 / 100.0)) {
             step_depth += 1;
             break;
         }
@@ -277,22 +311,55 @@ fn rayMarch(ray: Ray) -> RayMarchHit {
 const PIXEL_SAMPLING_RATE = 1;
 const PIXEL_SAMPLING_BORDER = 0.4;
 
+fn renderSkybox(ray: Ray, hit: RayMarchHit) -> vec3<f32> {
+    let sun_proj = dot(ray.direction, frame.sun_dir);
+    let sun_angle = acos(sun_proj);
+
+    let SUN_DISK_ANGLE = (PI / 180.0) * 0.5;
+    let SUN_FADE_ANGLE = (PI / 180.0) * 1.0;
+
+    let sun_color = vec3<f32>(20.0);
+
+    let sky_fac = pow(f32(hit.step_depth) * 0.002, 2.0);
+    let sky_color =
+        0.0 * vec3<f32>(0.7, 0.7, 1.0) * vec3<f32>(max(0.0, 1.0 - sky_fac))
+        + vec3<f32>(30.0, 30.0, 30.0) * vec3<f32>(sky_fac);
+
+    if (sun_angle <= SUN_DISK_ANGLE) {
+        return sun_color;
+    } else if (sun_angle <= SUN_FADE_ANGLE) {
+        let fac = 1.0 - (sun_angle - SUN_DISK_ANGLE) / (SUN_FADE_ANGLE - SUN_DISK_ANGLE);
+        return mix(sky_color, sun_color, pow(fac, 3.0));
+    } else {
+        return sky_color;
+    }
+}
+
 fn renderHit(ray: Ray, hit: RayMarchHit) -> vec3<f32> {
+    // let fogColor = vec3<f32>(0.7,0.7, 1.0);
+    let fogColor = mix(vec3<f32>(0.7, 0.7, 1.0), normalize(renderSkybox(ray, hit)), 0.9); // vec3<f32>(0.7, 0.7, 1.0);
+
     var color: vec3<f32>;
     if (hit.cutoff_reason == CUTOFF_REASON_DISTANCE) {
-        color = vec3<f32>(1.0); // mix(vec3<f32>(0.5), vec3<f32>(1.0, 0.2, 0.2), clamp(pow(f32(hit.step_depth) * 0.01, 2.0), 0.0, 1.0));
+        color = renderSkybox(ray, hit); // mix(vec3<f32>(0.5), vec3<f32>(1.0, 0.2, 0.2), clamp(pow(f32(hit.step_depth) * 0.01, 2.0), 0.0, 1.0));
     } else if (hit.cutoff_reason == CUTOFF_REASON_STEPS) {
-        color = vec3<f32>(1.0); //color_map_a(hit.depth * 0.1);
+        color = fogColor; //color_map_a(hit.depth * 0.1);
     } else {
         let normal = sdSceneNormal(hit.pos);
 
+        // Shading And Coloring
+
         let scene_light = PhongReflectionLight(
-            normalize(SUN_DIR) * 10000.0,
+            frame.sun_dir * 10000.0,
             1.0,
             1.0,
         );
 
-        let base_material_color = color_map_a(0.0* hit.depth * 0.001 + 0.0 * (f32(hit.step_depth) / f32(RAY_MARCHING_MAX_STEP_DEPTH)) * 0.1);
+        let base_material_color = color_map_default(
+            length(
+                hit.pos + vec3<f32>(30.0 * sin(frame.time * 0.1 + 20.75), 40.0 * sin(frame.time * 0.25 + 10.75), 50.0 * sin(frame.time * 0.5 + 100.75))
+            ) * 0.001 + (f32(hit.step_depth) / f32(RAY_MARCHING_MAX_STEP_DEPTH)) * 0.1
+        ) * 10.0;
 
         let phong_light = phong_reflect_light(
             frame.cam_pos, hit.pos, normal,
@@ -300,13 +367,19 @@ fn renderHit(ray: Ray, hit: RayMarchHit) -> vec3<f32> {
             scene_light,
         );
 
-        let shadow = rayMarchHitApproxSoftShadow(ray, hit, normalize(SUN_DIR));
+        let shadow = rayMarchHitApproxSoftShadow(ray, hit, frame.sun_dir);
         let ao = rayMarchHitApproxAO(ray, hit);
 
         let shading_light = shadow * phong_light;
         let light = (shading_light * 0.99 + 0.01 * ao);
 
         color = base_material_color * 2.0 * pow(light, 0.8);
+
+        // Fog
+
+        let fogFac = 1.0 - exp(-pow(hit.depth * 0.0001, 2.0));
+        color = mix(color, fogColor, clamp(fogFac, 0.0, 1.0));
+
         // color = color * vec3<f32>(shadow * 0.9 + 0.1);
         // color = vec3<f32>(shadow);
     }

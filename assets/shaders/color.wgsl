@@ -146,5 +146,5 @@ fn hdr_map_aces_tone(hdr: vec3<f32>) -> vec3<f32> {
 //
 
 fn color_map_default(x: f32) -> vec3<f32> {
-    return color_map_3(x);
+    return color_map_1(x);
 }
