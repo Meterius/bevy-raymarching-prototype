@@ -52,7 +52,7 @@ fn sdVertexPlaneB(p: vec3<f32>, n: vec3<f32>, b: vec3<f32>) -> f32 {
 
 // SD Complexes
 
-const REC_TETR_ITER: i32 = 10;
+const REC_TETR_ITER: i32 = 16;
 const REC_TETR_SCALE: f32 = 1.0;
 const REC_TETR_OFFSET: vec3<f32> = vec3<f32>(1.0, 1.0, 1.0);
 
@@ -87,15 +87,6 @@ fn sdTetrahedron(p: vec3<f32>) -> f32 {
     return min(a, b);*/
 }
 
-fn sdPreMirrorB(p: vec3<f32>, n: vec3<f32>, b: vec3<f32>) -> vec3<f32> {
-    let dist = sdVertexPlaneB(p, n, b);
-    if (dist <= 0.0) {
-        return p - 2.0 * dist * n;
-    } else {
-        return p;
-    }
-}
-
 fn sdRecursiveTetrahedron(p: vec3<f32>) -> f32 {
     return sdTetrahedron(p);
 }
@@ -106,28 +97,12 @@ fn sdPreTranslate(p: vec3<f32>, translation: vec3<f32>) -> vec3<f32> {
     return p - translation;
 }
 
-fn sdPostTranslate(sd: f32, translation: vec3<f32>) -> f32 {
-    return sd;
+fn sdPreScale(p: vec3<f32>, scale_origin: vec3<f32>, scale: f32) -> vec3<f32> {
+    return (p - scale_origin) * vec3<f32>(scale) + scale_origin;
 }
 
-fn sdPreScale(p: vec3<f32>, scale_origin: vec3<f32>, scale: vec3<f32>) -> vec3<f32> {
-    return (p - scale_origin) * scale + scale_origin;
-}
-
-fn sdPostScale(sd: f32, scale_origin: vec3<f32>, scale: vec3<f32>) -> f32 {
-    return sd / scale.x;
-}
-
-fn sdPreTransformUnit(p: vec3<f32>, translation: vec3<f32>, scale: vec3<f32>) -> vec3<f32> {
-    let p2 = sdPreScale(p, vec3<f32>(0.0), scale);
-    let p3 = sdPreTranslate(p, translation);
-    return p3;
-}
-
-fn sdPostTransformUnit(sd3: f32, translation: vec3<f32>, scale: vec3<f32>) -> f32 {
-    let sd2 = sdPostTranslate(sd3, translation);
-    let sd = sdPostScale(sd2, vec3<f32>(0.0), scale);
-    return sd;
+fn sdPostScale(sd: f32, scale_origin: vec3<f32>, scale: f32) -> f32 {
+    return sd / vec3<f32>(scale);
 }
 
 fn sdPostUnion(sd1: f32, sd2: f32) -> f32 {
@@ -149,3 +124,21 @@ fn sdPostInverse(sd1: f32) -> f32 {
 fn sdPostDifference(sd1: f32, sd2: f32) -> f32 {
     return max(sd1, -sd2);
 }
+
+fn sdPreMirrorB(p: vec3<f32>, n: vec3<f32>, b: vec3<f32>) -> vec3<f32> {
+    let dist = sdVertexPlaneB(p, n, b);
+    if (dist <= 0.0) {
+        return p - 2.0 * dist * n;
+    } else {
+        return p;
+    }
+}
+
+fn sdPreCheapBend(p: vec3<f32>) -> vec3<f32> {
+    let k = 10.0;
+    let c = cos(k * p.x);
+    let s = sin(k * p.x);
+    let m = mat2x2(c, -s, s, c);
+    return vec3<f32>(m * vec2<f32>(p.x, p.y), p.z);
+}
+

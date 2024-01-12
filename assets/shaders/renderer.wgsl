@@ -1,7 +1,7 @@
 #import "shaders/compiled/utils.wgsl"::{PI, max_comp3, euclid_mod, smooth_min, wrap, wrap_reflect, min4, min5, min3}
 #import "shaders/compiled/color.wgsl"::{color_map_default, color_map_a}
 #import "shaders/compiled/phong_reflection_model.wgsl"::{PhongReflectionMaterial, mix_material, phong_reflect_color, PhongReflectionLight}
-#import "shaders/compiled/signed_distance.wgsl"::{sdSphere, sdUnion, sdSmoothUnion, sdRecursiveTetrahedron}
+#import "shaders/compiled/signed_distance.wgsl"::{sdSphere, sdUnion, sdPostSmoothUnion, sdRecursiveTetrahedron, sdBox, sdPreCheapBend, sdPreMirrorB}
 
 @group(0) @binding(0) var texture: texture_storage_2d<rgba8unorm, read_write>;
 @group(0) @binding(1) var<uniform> frame: RayMarcherFrameData;
@@ -19,12 +19,6 @@ struct RayMarcherFrameData {
 }
 
 //
-
-const SCENE_LIGHT = PhongReflectionLight(
-    vec3<f32>(3.0, 4.0, 3.0),
-    vec3<f32>(1.0, 1.0, 1.0),
-    vec3<f32>(1.0, 1.0, 1.0),
-);
 
 fn invocationIdToTextureCoord(invocation_id: vec3<u32>) -> vec2<i32> {
     return vec2<i32>(i32(invocation_id.x), i32(invocation_id.y));
@@ -45,10 +39,6 @@ fn viewportCoordToRayDir(viewport_coord: vec2<f32>) -> vec3<f32> {
 
 // Scene
 
-fn sdSceneLight(p: vec3<f32>) -> f32 {
-    return sdSphere(p, SCENE_LIGHT.pos, 0.1);
-}
-
 fn sdSceneAxes(p: vec3<f32>) -> f32 {
     return min3(
         sdSphere(vec3<f32>(p.x, wrap(p.y, -0.5, 0.5), p.z), vec3<f32>(0.0), 0.1),
@@ -57,11 +47,18 @@ fn sdSceneAxes(p: vec3<f32>) -> f32 {
     );
 }
 
+fn sdSceneColumn(p: vec3<f32>) -> f32 {
+    return min3(
+        sdBox(p, vec3<f32>(0.0, 3.0, 0.0), vec3<f32>(0.5, 3.0, 0.5)),
+        sdBox(p, vec3<f32>(0.0, 5.0, 0.0), vec3<f32>(0.75, 0.15, 0.75)),
+        sdBox(p, vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(0.7, 1.0, 0.7)),
+    );
+}
+
 fn sdScene(p: vec3<f32>) -> f32 {
-    var q = p;
+    var q = sdPreMirrorB(p, normalize(vec3<f32>(1.0, -1.0 * sin(2.0 * PI * frame.time / 50.0), 0.0)), vec3<f32>(-200.0, 0.0, 0.0));
 
     let scale = 200.0;
-
     let tq = vec3<f32>(
         wrap(q.x, -scale*2.0, scale*2.0),
         q.y,
@@ -69,17 +66,21 @@ fn sdScene(p: vec3<f32>) -> f32 {
     );
     let t = sdRecursiveTetrahedron(tq / scale - vec3<f32>(0.0, 1.0, 0.0)) * scale;
 
-    return min3(
-        t,
+    var col_q = q + sin(frame.time * 2.0 * PI / 5.0) * vec3<f32>(2.0, 0.0, 0.0);
+    col_q = vec3<f32>(
+        wrap(col_q.x, -4.0, 4.0),
+        col_q.y,
+        wrap(col_q.z, -2.0, 2.0),
+    );
+
+    return min(
+        sdPostSmoothUnion(sdPostSmoothUnion (t, sdSceneColumn(col_q), 1.5), q.y, 1.5),
         sdSceneAxes(q),
-        p.y,
     );
 }
 
 fn sdSceneMaterial(p: vec3<f32>, base_color: vec3<f32>) -> PhongReflectionMaterial {
-    if (isCollidingDistance(sdSceneLight(p))) {
-        return PhongReflectionMaterial(vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.9), 1.0);
-    } else if (isCollidingDistance(sdSceneAxes(p)) && length(p) > 0.5) {
+    if (isCollidingDistance(sdSceneAxes(p)) && length(p) > 0.5) {
         var color: vec3<f32>;
         if (abs(p.x) > 0.5) {
             color = vec3<f32>(0.5 + f32(p.x > 0.0) * 1.0, 0.2, 0.2);
@@ -107,25 +108,11 @@ fn sdSceneNormal(p: vec3<f32>) -> vec3<f32> {
 
 const SUN_DIR = vec3<f32>(0.5, 1.0, 3.0);
 
-fn canSeeSun(p: vec3<f32>) -> bool {
-    let dir = normalize(SUN_DIR);
-    let hit = rayMarch(recastRayFromHit(Ray(p, dir)));
-    return hit.cutoff_reason != CUTOFF_REASON_NONE;
-}
-
-fn canSeeSceneLight(p: vec3<f32>) -> bool {
-    let dir = SCENE_LIGHT.pos - p;
-    let dir_len = length(dir);
-    let hit = rayMarchWithLimitedDepth(recastRayFromHit(Ray(p, dir / dir_len)), dir_len);
-    return hit.depth >= dir_len;
-}
-
 // Ray Marching
 
-const RAY_MARCHING_MAX_STEP_DEPTH = 2000;
+const RAY_MARCHING_MAX_STEP_DEPTH = 400;
 const RAY_MARCHER_COLLISION_DISTANCE = 0.0001;
-const RAY_MARCHER_RECAST_SKIP = 0.01;
-const RAY_MARCHER_MAX_DEPTH = 1000000.0;
+const RAY_MARCHER_MAX_DEPTH = 10000.0;
 
 const CUTOFF_REASON_NONE = 0u;
 const CUTOFF_REASON_DISTANCE = 1u;
@@ -148,13 +135,40 @@ fn isCollidingDistance(sd: f32) -> bool {
     return sd <= RAY_MARCHER_COLLISION_DISTANCE;
 }
 
-fn recastRayFromHit(ray: Ray) -> Ray {
-    return Ray(ray.origin + ray.direction * RAY_MARCHER_RECAST_SKIP, ray.direction);
+const APPROX_AO_SAMPLE_COUNT = 5;
+const APPROX_AO_SAMPLE_STEP = 0.1;
+
+fn rayMarchHitApproxSoftShadow(ray: Ray, hit: RayMarchHit, sun_dir: vec3<f32>) -> f32 {
+    let light_hit = rayMarchWith(Ray(hit.pos, sun_dir), RayMarchOptions(RAY_MARCHER_MAX_DEPTH, true));
+    return f32(light_hit.cutoff_reason != CUTOFF_REASON_NONE);
 }
 
-fn rayMarchWithLimitedDepth(ray: Ray, depth_limit: f32) -> RayMarchHit {
-    var position = ray.origin;
-    var depth = 0.0;
+fn rayMarchHitApproxAO(ray: Ray, hit: RayMarchHit) -> f32 {
+    if (hit.cutoff_reason != CUTOFF_REASON_NONE) {
+        return 0.0;
+    }
+
+    let normal = sdSceneNormal(hit.pos);
+
+    var total = 0.0;
+
+    for (var i = 1; i < APPROX_AO_SAMPLE_COUNT; i += 1) {
+        let delta = f32(i) * APPROX_AO_SAMPLE_STEP;
+        let sd = sdScene(hit.pos + normal * delta);
+        total += pow(2.0, f32(-i)) * (delta - sd);
+    }
+
+    return 1.0 - clamp(5.0 * total, 0.0, 1.0);
+}
+
+struct RayMarchOptions {
+    depth_limit: f32,
+    use_hit_escape: bool,
+}
+
+fn rayMarchWith(ray: Ray, options: RayMarchOptions) -> RayMarchHit {
+    var depth = f32(options.use_hit_escape) * 0.01;
+    var position = ray.origin + depth * ray.direction;
     var shortest_distance = 3.40282346638528859812e+38f;
 
     var step_depth = 0;
@@ -172,7 +186,7 @@ fn rayMarchWithLimitedDepth(ray: Ray, depth_limit: f32) -> RayMarchHit {
         let ray_offset = vec3<f32>(0.0); // vec3<f32>(0.0, sin(depth) * 0.35, 0.0);
         position = ray.origin + depth * ray.direction + ray_offset;
 
-        if (depth >= depth_limit) {
+        if (depth >= options.depth_limit) {
             cutoff_reason = CUTOFF_REASON_DISTANCE;
             break;
         }
@@ -188,7 +202,7 @@ fn rayMarchWithLimitedDepth(ray: Ray, depth_limit: f32) -> RayMarchHit {
 }
 
 fn rayMarch(ray: Ray) -> RayMarchHit {
-    return rayMarchWithLimitedDepth(ray, RAY_MARCHER_MAX_DEPTH);
+    return rayMarchWith(ray, RayMarchOptions(RAY_MARCHER_MAX_DEPTH, false));
 }
 
 // Rendering
@@ -196,30 +210,41 @@ fn rayMarch(ray: Ray) -> RayMarchHit {
 const PIXEL_SAMPLING_RATE = 1;
 const PIXEL_SAMPLING_BORDER = 0.4;
 
-fn renderHit(hit: RayMarchHit) -> vec3<f32> {
+fn renderHit(ray: Ray, hit: RayMarchHit) -> vec3<f32> {
     if (hit.cutoff_reason == CUTOFF_REASON_DISTANCE) {
-        return vec3<f32>(1.0);
+        return mix(vec3<f32>(0.5), vec3<f32>(1.0, 0.2, 0.2), clamp(pow(f32(hit.step_depth) * 0.01, 2.0), 0.0, 1.0));
     } else if (hit.cutoff_reason == CUTOFF_REASON_STEPS) {
-        return vec3<f32>(1.0);
+        return vec3<f32>(1.0); //color_map_a(hit.depth * 0.1);
     } else {
         let normal = sdSceneNormal(hit.pos);
+
+        let scene_light = PhongReflectionLight(
+            normalize(SUN_DIR) * 10000.0,
+            vec3<f32>(1.0, 1.0, 1.0),
+            vec3<f32>(1.0, 1.0, 1.0),
+        );
 
         let color1 = phong_reflect_color(
             frame.cam_pos, hit.pos, normal,
             sdSceneMaterial(hit.pos, color_map_a(hit.depth * 0.001 + (f32(hit.step_depth) / f32(RAY_MARCHING_MAX_STEP_DEPTH)) * 0.1)),
-            SCENE_LIGHT,
+            scene_light,
         );
 
         let color2 = mix(color1, vec3<f32>(0.0), min(f32(hit.step_depth) / 100.0, 0.7));
         // let color3 = mix(color1, vec3<f32>(0.0), 0.7 * (1.0 - f32(canSeeSun(hit.pos))));
 
-        return mix(color2, vec3<f32>(1.0), min(hit.depth / 1000.0, 1.0));
+        let shadow = rayMarchHitApproxSoftShadow(ray, hit, normalize(SUN_DIR));
+        let ao = rayMarchHitApproxAO(ray, hit);
+        let light = vec3<f32>(mix(shadow, ao, 0.5));
+
+        return mix(vec3<f32>(0.0), color2, light);
+        //return mix(color2, vec3<f32>(1.0), min(hit.depth / 1000.0, 1.0));
     }
 }
 
 fn renderRay(ray: Ray) -> vec3<f32> {
     let hit = rayMarch(ray);
-    return renderHit(hit);
+    return renderHit(ray, hit);
 }
 
 fn renderPixel(texture_coord: vec2<i32>) -> vec3<f32> {
