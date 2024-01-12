@@ -1,6 +1,6 @@
 #import "shaders/compiled/utils.wgsl"::{PI, max_comp3, euclid_mod, smooth_min, wrap, wrap_reflect, min4, min5, min3}
-#import "shaders/compiled/color.wgsl"::{color_map_default, color_map_a, color_map_temp}
-#import "shaders/compiled/phong_reflection_model.wgsl"::{PhongReflectionMaterial, mix_material, phong_reflect_color, PhongReflectionLight}
+#import "shaders/compiled/color.wgsl"::{color_map_default, color_map_a, color_map_temp, hdr_map_aces_tone}
+#import "shaders/compiled/phong_reflection_model.wgsl"::{PhongReflectionMaterial, mix_material, phong_reflect_light, PhongReflectionLight}
 #import "shaders/compiled/signed_distance.wgsl"::{sdSphere, sdUnion, sdPostSmoothUnion, sdRecursiveTetrahedron, sdBox, sdPreCheapBend, sdPreMirrorB}
 
 @group(0) @binding(0) var texture: texture_storage_2d<rgba8unorm, read_write>;
@@ -53,10 +53,11 @@ fn sdSceneAxes(p: vec3<f32>) -> f32 {
 }
 
 fn sdSceneColumn(p: vec3<f32>) -> f32 {
-    return min3(
+    return min4(
         sdBox(p, vec3<f32>(0.0, 3.0, 0.0), vec3<f32>(0.5, 3.0, 0.5)),
         sdBox(p, vec3<f32>(0.0, 5.0, 0.0), vec3<f32>(0.75, 0.15, 0.75)),
         sdBox(p, vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(0.7, 1.0, 0.7)),
+        sdSphere(p, vec3<f32>(0.0, 8.0, 0.0), 0.5),
     );
 }
 
@@ -119,10 +120,10 @@ fn sdSceneMaterial(p: vec3<f32>, base_color: vec3<f32>) -> PhongReflectionMateri
             color = vec3<f32>(0.2, 0.2, 0.5 + f32(p.z > 0.0) * 1.0);
         }
 
-        return PhongReflectionMaterial(color, vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.9), 1.0);
+        return PhongReflectionMaterial(color, 0.0, 0.0, 0.9, 1.0);
     }
 
-    return PhongReflectionMaterial(base_color, vec3<f32>(0.0), vec3<f32>(0.7), vec3<f32>(0.05), 30.0);
+    return PhongReflectionMaterial(base_color, 0.0, 0.7, 0.05, 30.0);
 }
 
 const NORMAL_EPSILON = 0.001;
@@ -157,6 +158,7 @@ struct RayMarchHit {
     depth: f32,
     step_depth: i32,
     shortest_distance: f32,
+    soft_shadow_factor: f32,
     cutoff_reason: u32,
     average_sd_scene_data: SdSceneData,
     minimal_sd_scene_data: SdSceneData,
@@ -172,7 +174,9 @@ const APPROX_AO_SAMPLE_STEP = 0.1;
 
 fn rayMarchHitApproxSoftShadow(ray: Ray, hit: RayMarchHit, sun_dir: vec3<f32>) -> f32 {
     let light_hit = rayMarchWith(Ray(hit.pos, sun_dir), RayMarchOptions(RAY_MARCHER_MAX_DEPTH, true));
-    return f32(light_hit.cutoff_reason != CUTOFF_REASON_NONE);
+    return f32(light_hit.cutoff_reason != CUTOFF_REASON_NONE) * clamp(
+        pow(light_hit.soft_shadow_factor, 0.8), 0.0, 1.0,
+    );
 }
 
 fn rayMarchHitApproxAO(ray: Ray, hit: RayMarchHit) -> f32 {
@@ -202,6 +206,7 @@ fn rayMarchWith(ray: Ray, options: RayMarchOptions) -> RayMarchHit {
     var depth = f32(options.use_hit_escape) * 0.01;
     var position = ray.origin + depth * ray.direction;
     var shortest_distance = 3.40282346638528859812e+38f;
+    var soft_shadow_factor = 3.40282346638528859812e+38f;
 
     var step_depth = 0;
     var cutoff_reason = 0u;
@@ -224,7 +229,14 @@ fn rayMarchWith(ray: Ray, options: RayMarchOptions) -> RayMarchHit {
 
         shortest_distance = min(sd, shortest_distance);
 
-        if (sd <= RAY_MARCHER_COLLISION_DISTANCE * max(1.0, 1.0 + depth * 0.5)) {
+        if (depth >= 0.1) {
+            soft_shadow_factor = min(
+                soft_shadow_factor,
+                sd / depth,
+            );
+        }
+
+        if (sd <= RAY_MARCHER_COLLISION_DISTANCE) {
             step_depth += 1;
             break;
         }
@@ -250,7 +262,8 @@ fn rayMarchWith(ray: Ray, options: RayMarchOptions) -> RayMarchHit {
     );
 
     return RayMarchHit(
-        position, depth, step_depth, shortest_distance, cutoff_reason, sd_scene_data_average,
+        position, depth, step_depth, shortest_distance,
+        soft_shadow_factor, cutoff_reason, sd_scene_data_average,
         sd_scene_data_minimal, sd_scene_data_maximal
     );
 }
@@ -275,13 +288,13 @@ fn renderHit(ray: Ray, hit: RayMarchHit) -> vec3<f32> {
 
         let scene_light = PhongReflectionLight(
             normalize(SUN_DIR) * 10000.0,
-            vec3<f32>(1.0, 1.0, 1.0),
-            vec3<f32>(1.0, 1.0, 1.0),
+            1.0,
+            1.0,
         );
 
         let base_material_color = color_map_a(0.0* hit.depth * 0.001 + 0.0 * (f32(hit.step_depth) / f32(RAY_MARCHING_MAX_STEP_DEPTH)) * 0.1);
 
-        let material_reflect_color = phong_reflect_color(
+        let phong_light = phong_reflect_light(
             frame.cam_pos, hit.pos, normal,
             sdSceneMaterial(hit.pos, base_material_color),
             scene_light,
@@ -289,9 +302,13 @@ fn renderHit(ray: Ray, hit: RayMarchHit) -> vec3<f32> {
 
         let shadow = rayMarchHitApproxSoftShadow(ray, hit, normalize(SUN_DIR));
         let ao = rayMarchHitApproxAO(ray, hit);
-        let light = vec3<f32>(mix(shadow, ao, 0.5));
 
-        color = mix(vec3<f32>(0.0), material_reflect_color, light);
+        let shading_light = shadow * phong_light;
+        let light = (shading_light * 0.99 + 0.01 * ao);
+
+        color = base_material_color * 2.0 * pow(light, 0.8);
+        // color = color * vec3<f32>(shadow * 0.9 + 0.1);
+        // color = vec3<f32>(shadow);
     }
 
     // let iter = hit.average_sd_scene_data.iterations;
@@ -348,5 +365,5 @@ fn update(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         color = color_map_temp(0.5 * viewport_coord.x + 0.5) * vec3<f32>(f32(viewport_coord.y <= -0.95));
     }
 
-    textureStore(texture, texture_coord, vec4<f32>(color, 1.0));
+    textureStore(texture, texture_coord, vec4<f32>(hdr_map_aces_tone(color), 1.0));
 }

@@ -1,16 +1,16 @@
-const I_A = vec3<f32>(1.0, 1.0, 1.0);
+const I_A = 1.0;
 
 struct PhongReflectionLight {
     pos: vec3<f32>,
-    i_s: vec3<f32>,
-    i_d: vec3<f32>,
+    i_s: f32,
+    i_d: f32,
 }
 
 struct PhongReflectionMaterial {
     color: vec3<f32>,
-    k_s: vec3<f32>,
-    k_d: vec3<f32>,
-    k_a: vec3<f32>,
+    k_s: f32,
+    k_d: f32,
+    k_a: f32,
     a: f32,
 }
 
@@ -24,19 +24,19 @@ fn mix_material(m1: PhongReflectionMaterial, m2: PhongReflectionMaterial, fac: f
     );
 }
 
-fn phong_reflect_color(
+fn phong_reflect_light(
     origin: vec3<f32>,
     hit: vec3<f32>,
     normal: vec3<f32>,
     material: PhongReflectionMaterial,
     light: PhongReflectionLight,
-) -> vec3<f32> {
-    var color = material.color * material.k_a * I_A;
+) -> f32 {
+    var val = material.k_a * I_A;
     let v = normalize(origin - hit);
 
     let l_m = normalize(light.pos - hit);
     let r_m = 2.0 * dot(l_m, normal) * normal - l_m;
-    color += material.color * material.k_d * max(0.0, dot(l_m, normal)) * light.i_d + material.k_s * pow(max(0.0, dot(r_m, v)), material.a) * light.i_s;
+    val += material.k_d * max(0.0, dot(l_m, normal)) * light.i_d + material.k_s * pow(max(0.0, dot(r_m, v)), material.a) * light.i_s;
 
-    return color;
+    return val;
 }
