@@ -1,4 +1,5 @@
 use crate::renderer::{RayMarcherCamera, RENDER_TEXTURE_SIZE};
+use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 use bevy::render::extract_resource::ExtractResource;
 use bevy::render::render_resource::ShaderType;
@@ -18,6 +19,7 @@ pub struct RayMarcherFrameData {
     cam_forward: Vec3,
     cam_up: Vec3,
     cam_right: Vec3,
+    world_scale: f32,
 }
 
 #[derive(Default)]
@@ -28,6 +30,7 @@ impl Plugin for RayMarcherDataPlugin {
         app.register_type::<RayMarcherFrameData>()
             .insert_resource(RayMarcherFrameData {
                 texture_size: Vec2::new(RENDER_TEXTURE_SIZE.0 as _, RENDER_TEXTURE_SIZE.1 as _),
+                world_scale: 1.0,
                 ..default()
             })
             .add_systems(PostUpdate, update_frame_data);
@@ -40,7 +43,26 @@ fn update_frame_data(
     camera: Query<(&Camera, &GlobalTransform), With<RayMarcherCamera>>,
     time: Res<Time>,
     mut frame_data: ResMut<RayMarcherFrameData>,
+    mut ev_scroll: EventReader<MouseWheel>,
 ) {
+    // Scroll
+
+    static MINIMAL_SCALE: f32 = 0.25;
+    static MAXIMAL_SCALE: f32 = 20.0;
+
+    use bevy::input::mouse::MouseScrollUnit;
+    for ev in ev_scroll.read() {
+        let y = match ev.unit {
+            MouseScrollUnit::Line => ev.y / 2.0,
+            MouseScrollUnit::Pixel => ev.y / 100.0,
+        };
+
+        frame_data.world_scale =
+            (frame_data.world_scale * 0.8f32.powf(-y)).clamp(MINIMAL_SCALE, MAXIMAL_SCALE);
+    }
+
+    //
+
     frame_data.time = time.elapsed_seconds();
 
     let (cam, cam_transform) = camera.single();

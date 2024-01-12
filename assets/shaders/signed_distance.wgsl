@@ -1,4 +1,4 @@
-#import "shaders/compiled/utils.wgsl"::{max_comp3, smooth_min, euclid_mod, max3, max4, max5, min3, min4, min5}
+#import "shaders/compiled/utils.wgsl"::{max_comp3, smooth_min, euclid_mod, max3, max4, max5, min3, min4, min5, SQRT_2_INVERSE, SQRT_2, SQRT_3, SQRT_3_INVERSE}
 
 // SD Primitives
 
@@ -52,43 +52,58 @@ fn sdVertexPlaneB(p: vec3<f32>, n: vec3<f32>, b: vec3<f32>) -> f32 {
 
 // SD Complexes
 
-const REC_TETR_ITER: i32 = 16;
+const REC_TETR_ITER: i32 = 10;
 const REC_TETR_SCALE: f32 = 1.0;
 const REC_TETR_OFFSET: vec3<f32> = vec3<f32>(1.0, 1.0, 1.0);
 
 fn sdTetrahedron(p: vec3<f32>) -> f32 {
+    return SQRT_3_INVERSE * max(
+        abs(p.x - p.z) + p.y,
+        abs(p.x + p.z) - p.y
+    ) - SQRT_3_INVERSE;
+}
+
+fn sdRecursiveTetrahedron(p: vec3<f32>) -> vec2<f32> {
     var q = p;
+    var adjustment = 1.0;
 
     var i = 1;
     for (; i <= REC_TETR_ITER; i += 1) {
-        q = q * vec3<f32>(2.0) - vec3<f32>(1.0);
-        q = sdPreMirrorB(q, normalize(vec3<f32>(1.0, 0.0, -1.0)), vec3<f32>(0.0));
-        q = sdPreMirrorB(q, normalize(vec3<f32>(-1.0, 1.0, 0.0)), vec3<f32>(0.0, 0.0, 0.0));
-        q = sdPreMirrorB(q, normalize(vec3<f32>(1.0, 0.0, 1.0)), vec3<f32>(-1.0, 0.0, -1.0));
+        let sd_temp = sdTetrahedron(q);
+        if (sdTetrahedron(q) >= 0.1) {
+            return vec2<f32>(sd_temp * adjustment, f32(i));
+        }
+
+        adjustment *= 0.5;
+
+        q.x = 2.0 * q.x - 1.0;
+        q.y = 2.0 * q.y - 1.0;
+        q.z = 2.0 * q.z - 1.0;
+
+        var diff = q.x - q.z;
+        if (diff <= 0.0) {
+            let t = q.x;
+            q.x = q.z;
+            q.z = t;
+        }
+
+        diff = q.y - q.x;
+        if (diff <= 0.0) {
+            let t = q.x;
+            q.x = q.y;
+            q.y = t;
+        }
+
+        diff = q.x + q.z + 2.0;
+        if (diff <= 0.0) {
+            q.x -= diff;
+            q.z -= diff;
+        }
     }
 
-    let a = max4(
-        sdVertexPlaneB(q, normalize(vec3<f32>(1.0, 1.0, -1.0)), vec3<f32>(1.0, 1.0, 1.0)),
-        sdVertexPlaneB(q, normalize(vec3<f32>(-1.0, 1.0, 1.0)), vec3<f32>(1.0, 1.0, 1.0)),
-        sdVertexPlaneB(q, normalize(vec3<f32>(1.0, -1.0, 1.0)), vec3<f32>(1.0, -1.0, -1.0)),
-        sdVertexPlaneB(q, normalize(vec3<f32>(-1.0, -1.0, -1.0)), vec3<f32>(1.0, -1.0, -1.0)),
-    ) * pow(2.0, -f32(REC_TETR_ITER));
+    let sd = sdTetrahedron(q) * adjustment;
 
-    return a;
-
-    /*let b = min5(
-        sdSphere(p, vec3<f32>(0.0, 0.0, 0.0), 0.2),
-        sdSphere(p, vec3<f32>(1.0, 1.0, 1.0), 0.1),
-        sdSphere(p, vec3<f32>(-1.0, -1.0, 1.0), 0.1),
-        sdSphere(p, vec3<f32>(1.0, -1.0, -1.0), 0.1),
-        sdSphere(p, vec3<f32>(-1.0, 1.0, -1.0), 0.1),
-    );
-
-    return min(a, b);*/
-}
-
-fn sdRecursiveTetrahedron(p: vec3<f32>) -> f32 {
-    return sdTetrahedron(p);
+    return vec2<f32>(sd, f32(i));
 }
 
 // SD Operators
@@ -123,6 +138,15 @@ fn sdPostInverse(sd1: f32) -> f32 {
 
 fn sdPostDifference(sd1: f32, sd2: f32) -> f32 {
     return max(sd1, -sd2);
+}
+
+fn sdPreMirror(p: vec3<f32>, n: vec3<f32>, d: f32) -> vec3<f32> {
+    let dist = sdVertexPlane(p, n, d);
+    if (dist <= 0.0) {
+        return p - 2.0 * dist * n;
+    } else {
+        return p;
+    }
 }
 
 fn sdPreMirrorB(p: vec3<f32>, n: vec3<f32>, b: vec3<f32>) -> vec3<f32> {
