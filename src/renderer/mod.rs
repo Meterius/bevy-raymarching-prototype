@@ -1,4 +1,4 @@
-use crate::data::{RayMarcherFrameData, SdBox, SdScene};
+use crate::renderer::types::{RenderCamera, RenderGlobals, RenderScene};
 use bevy::core_pipeline::clear_color::ClearColorConfig;
 use bevy::render::renderer::RenderQueue;
 use bevy::window::PrimaryWindow;
@@ -14,7 +14,8 @@ use bevy::{
     },
 };
 use std::borrow::Cow;
-use std::f32::consts::PI;
+
+pub mod types;
 
 pub const RENDER_TEXTURE_SIZE: (u32, u32) = (2560, 1440);
 const WORKGROUP_SIZE: u32 = 8;
@@ -24,8 +25,9 @@ pub struct RayMarcherCamera {}
 
 #[derive(Resource)]
 pub struct RayMarcherBuffers {
-    frame_data_buffer: UniformBuffer<RayMarcherFrameData>,
-    scene_buffer: StorageBuffer<SdScene>,
+    globals_buffer: UniformBuffer<RenderGlobals>,
+    camera_buffer: UniformBuffer<RenderCamera>,
+    scene_buffer: UniformBuffer<RenderScene>,
 }
 
 #[derive(Debug, Clone, Default, Component)]
@@ -39,7 +41,7 @@ struct RayMarcherBindGroup(BindGroup);
 
 // App Systems
 
-pub fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
+fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     let mut image = Image::new_fill(
         Extent3d {
             width: RENDER_TEXTURE_SIZE.0,
@@ -84,7 +86,7 @@ pub fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     commands.insert_resource(RayMarcherTargetImage(image));
 }
 
-pub fn scale_target_to_screen(
+fn scale_target_to_screen(
     mut sprite: Query<&mut Transform, With<RayMarcherTargetSprite>>,
     window: Query<&Window, With<PrimaryWindow>>,
 ) {
@@ -95,58 +97,68 @@ pub fn scale_target_to_screen(
     .extend(1.0);
 }
 
+// Synchronization
+
+fn synchronize_globals(
+    mut render_globals: ResMut<RenderGlobals>,
+    time: Res<Time>,
+) {
+    render_globals.time = time.elapsed_seconds();
+}
+
+fn synchronize_camera(
+    camera: Query<(&Camera, &GlobalTransform), With<RayMarcherCamera>>,
+    mut render_camera: ResMut<RenderCamera>,
+) {
+    let (cam, cam_transform) = camera.single();
+    render_camera.aspect_ratio = cam.logical_viewport_size().unwrap_or_default().x
+        / cam.logical_viewport_size().unwrap_or_default().y;
+    render_camera.position = cam_transform.translation();
+    render_camera.forward = cam_transform.forward();
+    render_camera.right = cam_transform.right();
+    render_camera.up = cam_transform.up();
+    render_camera.unit_plane_distance = 1.25;
+}
 // Render Systems
 
 fn setup_buffers(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     buffers: Option<ResMut<RayMarcherBuffers>>,
-    frame_data: Res<RayMarcherFrameData>,
+    render_globals: Res<RenderGlobals>,
+    render_camera: Res<RenderCamera>,
+    render_scene: Res<RenderScene>,
     render_queue: Res<RenderQueue>,
 ) {
     if let Some(mut buffers) = buffers {
-        buffers.frame_data_buffer.set(frame_data.clone());
+        buffers.globals_buffer.set(render_globals.clone());
         buffers
-            .frame_data_buffer
+            .globals_buffer
             .write_buffer(&render_device, &render_queue);
 
-        buffers.scene_buffer.set(SdScene {
-            boxes: vec![
-                SdBox {
-                    position: Vec3::new(10.0, 5.0 + (frame_data.time * 2.0 * PI / 5.0).sin(), 3.0),
-                    size: Vec3::new(2.0, 0.5, 1.0),
-                },
-                SdBox {
-                    position: Vec3::new(-5.0, 5.0, 3.0),
-                    size: Vec3::new(3.0, 0.5, 1.0),
-                },
-            ],
-        });
+        buffers.camera_buffer.set(render_camera.clone());
+        buffers
+            .camera_buffer
+            .write_buffer(&render_device, &render_queue);
 
+        buffers.scene_buffer.set(render_scene.clone());
         buffers
             .scene_buffer
             .write_buffer(&render_device, &render_queue);
     } else {
-        let mut frame_data_buffer = UniformBuffer::from(frame_data.clone());
-        frame_data_buffer.write_buffer(&render_device, &render_queue);
+        let mut camera_buffer: UniformBuffer<RenderCamera> = UniformBuffer::from(render_camera.clone());
+        camera_buffer.write_buffer(&render_device, &render_queue);
 
-        let mut scene_buffer = StorageBuffer::from(SdScene {
-            boxes: vec![
-                SdBox {
-                    position: Vec3::new(10.0, 5.0, 3.0),
-                    size: Vec3::new(2.0, 0.5, 1.0),
-                },
-                SdBox {
-                    position: Vec3::new(-5.0, 5.0, 3.0),
-                    size: Vec3::new(3.0, 0.5, 1.0),
-                },
-            ],
-        });
+        let mut scene_buffer: UniformBuffer<RenderScene> = UniformBuffer::from(render_scene.clone());
         scene_buffer.write_buffer(&render_device, &render_queue);
 
+        let mut globals_buffer: UniformBuffer<RenderGlobals> = UniformBuffer::from(render_globals.clone());
+        globals_buffer.write_buffer(&render_device, &render_queue);
+
         commands.insert_resource(RayMarcherBuffers {
-            frame_data_buffer,
+            camera_buffer,
             scene_buffer,
+            globals_buffer,
         });
     }
 }
@@ -171,10 +183,14 @@ fn prepare_bind_group(
             },
             BindGroupEntry {
                 binding: 1,
-                resource: buffers.frame_data_buffer.binding().unwrap(),
+                resource: buffers.globals_buffer.binding().unwrap(),
             },
             BindGroupEntry {
                 binding: 2,
+                resource: buffers.camera_buffer.binding().unwrap(),
+            },
+            BindGroupEntry {
+                binding: 3,
                 resource: buffers.scene_buffer.binding().unwrap(),
             },
         ],
@@ -224,7 +240,17 @@ impl FromWorld for RayMarcherPipeline {
                             binding: 2,
                             visibility: ShaderStages::COMPUTE,
                             ty: BindingType::Buffer {
-                                ty: BufferBindingType::Storage { read_only: true },
+                                ty: BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        BindGroupLayoutEntry {
+                            binding: 3,
+                            visibility: ShaderStages::COMPUTE,
+                            ty: BindingType::Buffer {
+                                ty: BufferBindingType::Uniform,
                                 has_dynamic_offset: false,
                                 min_binding_size: None,
                             },
@@ -316,14 +342,6 @@ impl render_graph::Node for RayMarcherNode {
         render_context: &mut RenderContext,
         world: &World,
     ) -> Result<(), render_graph::NodeRunError> {
-        /*render_context.command_encoder().copy_buffer_to_buffer(
-            &buffers.staging_buffer,
-            0,
-            &buffers.buffer,
-            0,
-            std::mem::size_of::<RayMarcherFrameData>() as u64,
-        );*/
-
         let mut pass = render_context
             .command_encoder()
             .begin_compute_pass(&ComputePassDescriptor::default());
@@ -372,11 +390,28 @@ pub struct RayMarcherRenderPlugin {}
 
 impl Plugin for RayMarcherRenderPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ExtractResourcePlugin::<RayMarcherTargetImage>::default());
-        app.add_plugins(ExtractResourcePlugin::<RayMarcherFrameData>::default());
+        app.insert_resource(RenderCamera::default());
+        app.insert_resource(RenderScene {
+            sun_direction: Vec3::new(0.5, 1.0, 3.0).normalize(),
+            ..default()
+        });
+        app.insert_resource(RenderGlobals {
+            render_texture_size: Vec2::new(RENDER_TEXTURE_SIZE.0 as _, RENDER_TEXTURE_SIZE.1 as _),
+            ..default()
+        });
+
+        app.add_plugins((
+            ExtractResourcePlugin::<RayMarcherTargetImage>::default(),
+            ExtractResourcePlugin::<RenderCamera>::default(),
+            ExtractResourcePlugin::<RenderScene>::default(),
+            ExtractResourcePlugin::<RenderGlobals>::default(),
+        ));
 
         app.add_systems(Startup, setup);
         app.add_systems(Update, scale_target_to_screen);
+        app.add_systems(PostUpdate, (
+            synchronize_camera, synchronize_globals,
+        ));
 
         let render_app = app.sub_app_mut(RenderApp);
 

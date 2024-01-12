@@ -1,50 +1,13 @@
 #import "shaders/compiled/utils.wgsl"::{PI, max_comp3, euclid_mod, smooth_min, wrap, wrap_reflect, min4, min5, min3, wrap_cell, MAX_POSITIVE_F32}
 #import "shaders/compiled/color.wgsl"::{color_map_default, color_map_a, color_map_temp, hdr_map_aces_tone}
+#import "shaders/compiled/data.generated.wgsl"::{RenderGlobals, RenderScene, RenderCamera}
 #import "shaders/compiled/phong_reflection_model.wgsl"::{PhongReflectionMaterial, mix_material, phong_reflect_light, PhongReflectionLight}
 #import "shaders/compiled/signed_distance.wgsl"::{sdSphere, sdUnion, sdPostSmoothUnion, sdRecursiveTetrahedron, sdBox, sdPreCheapBend, sdPreMirrorB}
 
 @group(0) @binding(0) var texture: texture_storage_2d<rgba8unorm, read_write>;
-@group(0) @binding(1) var<uniform> frame: RayMarcherFrameData;
-@group(0) @binding(2) var<storage> scene: SdScene;
-
-struct RayMarcherFrameData {
-    time: f32,
-
-    texture_size: vec2<f32>,
-    screen_size: vec2<f32>,
-    aspect_ratio: f32,
-
-    cam_unit_plane_dist: f32,
-
-    cam_pos: vec3<f32>,
-    cam_forward: vec3<f32>,
-    cam_up: vec3<f32>,
-    cam_right: vec3<f32>,
-
-    sun_dir: vec3<f32>,
-
-    world_scale: f32,
-}
-
-struct SdBox {
-    position: vec3<f32>,
-    size: vec3<f32>,
-}
-
-struct SdScene {
-    boxes: array<SdBox>,
-}
-
-fn sdSceneFunc(p: vec3<f32>) -> f32 {
-    var sd = MAX_POSITIVE_F32 / 16.0;
-
-    let box_count = i32(arrayLength(&scene.boxes));
-    for (var i = 0; i < box_count; i += 1) {
-        sd = min(sd, sdBox(p, scene.boxes[i].position, scene.boxes[i].size / 2.0));
-    }
-
-    return sd;
-}
+@group(0) @binding(1) var<uniform> globals: RenderGlobals;
+@group(0) @binding(2) var<uniform> camera: RenderCamera;
+@group(0) @binding(3) var<uniform> scene: RenderScene;
 
 //
 
@@ -53,15 +16,15 @@ fn invocationIdToTextureCoord(invocation_id: vec3<u32>) -> vec2<i32> {
 }
 
 fn textureCoordToViewportCoord(texture_coord: vec2<f32>) -> vec2<f32> {
-    let flipped = vec2<f32>(2.0) * texture_coord / vec2<f32>(frame.texture_size) - vec2<f32>(1.0);
+    let flipped = vec2<f32>(2.0) * texture_coord / vec2<f32>(globals.render_texture_size) - vec2<f32>(1.0);
     return flipped * vec2<f32>(1.0, -1.0);
 }
 
 fn viewportCoordToRayDir(viewport_coord: vec2<f32>) -> vec3<f32> {
     return normalize(
-        frame.cam_forward * frame.cam_unit_plane_dist
-        + frame.cam_right * viewport_coord.x * 0.5 * frame.aspect_ratio
-        + frame.cam_up * viewport_coord.y * 0.5
+        camera.forward * camera.unit_plane_distance
+        + camera.right * viewport_coord.x * 0.5 * camera.aspect_ratio
+        + camera.up * viewport_coord.y * 0.5
     );
 }
 
@@ -84,8 +47,8 @@ fn sdSceneColumn(p: vec3<f32>, cell: vec3<f32>) -> f32 {
         ),
         sdSphere(p, vec3<f32>(0.0, 10.0 + (
             2.0 * (
-                sin(2.0 * PI * (cell.x * 0.1 + frame.time) / 10.0)
-                + sin(2.0 * PI * (cell.z * 0.1 + frame.time * 4.0) / 15.0)
+                sin(2.0 * PI * (cell.x * 0.1 + globals.time) / 10.0)
+                + sin(2.0 * PI * (cell.z * 0.1 + globals.time * 4.0) / 15.0)
             )
         ), 0.0), 0.5),
         1.1,
@@ -138,7 +101,7 @@ fn sdScene(p: vec3<f32>) -> SdSceneData {
     // Columns
 
     let sd_columns = sdSceneColumnPattern(q, vec2<f32>(1.0, 1.0));
-    let sd_large_columns = sdSceneColumnPattern(q / 30.0 + vec3<f32>(00.0, 0.0, 30.0), vec2<f32>(5.0 + sin(frame.time * 0.1) * 6.0, 10.0)) * 30.0;
+    let sd_large_columns = sdSceneColumnPattern(q / 30.0 + vec3<f32>(00.0, 0.0, 30.0), vec2<f32>(5.0 + sin(globals.time * 0.1) * 6.0, 10.0)) * 30.0;
 
     // Axes
 
@@ -148,7 +111,7 @@ fn sdScene(p: vec3<f32>) -> SdSceneData {
 
     let sd_plane = q.y;
 
-    return SdSceneData(min(min(sd_axes, sd_plane), sdSceneFunc(p)), 0.0);
+    return SdSceneData(min(sd_axes, sd_plane), 0.0);
 
     // return SdSceneData(min(
     //     sdPostSmoothUnion(
@@ -335,7 +298,7 @@ const PIXEL_SAMPLING_RATE = 1;
 const PIXEL_SAMPLING_BORDER = 0.4;
 
 fn renderSkybox(ray: Ray, hit: RayMarchHit) -> vec3<f32> {
-    let sun_proj = dot(ray.direction, frame.sun_dir);
+    let sun_proj = dot(ray.direction, scene.sun_direction);
     let sun_angle = acos(sun_proj);
 
     let SUN_DISK_ANGLE = (PI / 180.0) * 0.5;
@@ -373,24 +336,24 @@ fn renderHit(ray: Ray, hit: RayMarchHit) -> vec3<f32> {
         // Shading And Coloring
 
         let scene_light = PhongReflectionLight(
-            frame.sun_dir * 10000.0,
+            scene.sun_direction * 10000.0,
             1.0,
             1.0,
         );
 
         let base_material_color = color_map_default(
             length(
-                hit.pos + vec3<f32>(30.0 * sin(frame.time * 0.1 + 20.75), 40.0 * sin(frame.time * 0.25 + 10.75), 50.0 * sin(frame.time * 0.5 + 100.75))
+                hit.pos + vec3<f32>(30.0 * sin(globals.time * 0.1 + 20.75), 40.0 * sin(globals.time * 0.25 + 10.75), 50.0 * sin(globals.time * 0.5 + 100.75))
             ) * 0.001 + (f32(hit.step_depth) / f32(RAY_MARCHING_MAX_STEP_DEPTH)) * 0.1
         ) * 5.0;
 
         let phong_light = phong_reflect_light(
-            frame.cam_pos, hit.pos, normal,
+            camera.position, hit.pos, normal,
             sdSceneMaterial(hit.pos, base_material_color),
             scene_light,
         );
 
-        let shadow = rayMarchHitApproxSoftShadow(ray, hit, frame.sun_dir);
+        let shadow = rayMarchHitApproxSoftShadow(ray, hit, scene.sun_direction);
         let ao = rayMarchHitApproxAO(ray, hit);
 
         let shading_light = shadow * phong_light;
@@ -422,7 +385,7 @@ fn renderRay(ray: Ray) -> vec3<f32> {
 
 fn renderPixel(texture_coord: vec2<i32>) -> vec3<f32> {
     if (PIXEL_SAMPLING_RATE == 1) {
-        return renderRay(Ray(frame.cam_pos, viewportCoordToRayDir(textureCoordToViewportCoord(vec2<f32>(texture_coord)))));
+        return renderRay(Ray(camera.position, viewportCoordToRayDir(textureCoordToViewportCoord(vec2<f32>(texture_coord)))));
     } else {
         var color = vec3<f32>(0.0);
 
@@ -436,7 +399,7 @@ fn renderPixel(texture_coord: vec2<i32>) -> vec3<f32> {
                 let sub_pixel_viewport_coord = textureCoordToViewportCoord(vec2<f32>(texture_coord) + offset);
                 let sub_pixel_ray_dir = viewportCoordToRayDir(sub_pixel_viewport_coord);
                 color += renderRay(
-                    Ray(frame.cam_pos, sub_pixel_ray_dir)
+                    Ray(camera.position, sub_pixel_ray_dir)
                 ) / vec3<f32>(f32(PIXEL_SAMPLING_RATE * PIXEL_SAMPLING_RATE));
             }
         }

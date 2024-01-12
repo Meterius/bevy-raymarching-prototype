@@ -4,7 +4,7 @@ use bevy::window::{PresentMode, WindowResolution};
 use bevy_editor_pls::EditorPlugin;
 use bevy_flycam::NoCameraPlayerPlugin;
 
-pub mod data;
+pub mod input_handling;
 pub mod example_scene;
 pub mod renderer;
 
@@ -23,12 +23,12 @@ fn main() {
         FrameTimeDiagnosticsPlugin::default(),
         EntityCountDiagnosticsPlugin::default(),
         EditorPlugin::default(),
-        data::RayMarcherDataPlugin::default(),
         renderer::RayMarcherRenderPlugin::default(),
         NoCameraPlayerPlugin,
     ));
 
     app.add_systems(Startup, example_scene::setup_scene);
+    app.add_systems(Update, input_handling::receive_input);
 
     app.run();
 }

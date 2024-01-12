@@ -7,6 +7,8 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
+// WGSL Preprocessor
+
 #[allow(unused_macros)]
 macro_rules! warn {
     ($($tokens: tt)*) => {
@@ -224,6 +226,81 @@ fn compile_shaders() {
     });
 }
 
+// Wgsl Struct Generator
+
+fn is_shader_struct(item: &syn::ItemStruct) -> bool {
+    item.attrs.iter().any(|attr| {
+        match &attr.meta {
+            syn::Meta::List(value) => {
+                if let Some(ident) = value.path.get_ident() {
+                    if ident != &syn::Ident::new("derive", proc_macro2::Span::call_site()) {
+                        return false;
+                    }
+
+                    return value.tokens.clone().into_iter().any(
+                        |tree| match tree {
+                            proc_macro2::TokenTree::Ident(ident) => ident == syn::Ident::new("ShaderType", proc_macro2::Span::call_site()),
+                            _ => false
+                        }
+                    );
+                } else {
+                    return false;
+                }
+            },
+            _ => { return false; },
+        };
+    })
+}
+
+use quote::ToTokens;
+
+fn compile_shader_structs() {
+    let ast = syn::parse_file(include_str!("src/renderer/types.rs")).unwrap();
+
+    let mut result = String::new();
+
+    let mut type_translation = std::collections::HashMap::<String, String>::new();
+    type_translation.insert(String::from("f32"), String::from("f32"));
+    type_translation.insert(String::from("Vec2"), String::from("vec2<f32>"));
+    type_translation.insert(String::from("Vec3"), String::from("vec3<f32>"));
+
+    ast.items.iter().for_each(|item| {
+        match item {
+            syn::Item::Struct(def) => {
+                if !is_shader_struct(def) { return; }
+
+                result.push_str(format!("struct {} {{\n", def.ident).as_str());
+
+                def.fields.iter().for_each(|field| {
+                    let type_name = format!("{}", field.ty.to_token_stream());
+
+                    let translated_type_name = {
+                        let type_name = if type_name.starts_with("Vec < ") && type_name.ends_with(" >") {
+                            format!("array<{}>", &type_name.as_str()[6..type_name.len() - 2])
+                        } else { type_name };
+                        
+                        type_translation
+                            .get(type_name.as_str())
+                            .unwrap_or(&type_name)
+                            .clone()
+                    };
+
+                    result.push_str(format!("\t{}: {},\n", field.ident.as_ref().unwrap(), translated_type_name).as_str());
+                });
+
+                result.push_str("}\n\n");
+            },
+            _ => {},
+        };
+    });
+
+    let mut file = File::create(Path::new("assets/shaders/data.generated.wgsl")).unwrap();
+    file.write_all(result.as_bytes()).unwrap();
+}
+
+// Build Script
+
 fn main() {
+    compile_shader_structs();
     compile_shaders();
 }

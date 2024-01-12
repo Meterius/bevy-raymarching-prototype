@@ -407,7 +407,10 @@ dependencies = [
  "bevy_editor_pls",
  "bevy_flycam",
  "bytemuck",
+ "proc-macro2",
+ "quote",
  "regex",
+ "syn 2.0.48",
 ]
 
 [[package]]

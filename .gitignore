@@ -1,2 +1,3 @@
 /target
 assets/shaders/**/compiled
+assets/shaders/**/*.generated.wgsl
