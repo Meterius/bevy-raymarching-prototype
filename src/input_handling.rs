@@ -1,10 +1,11 @@
-use bevy::prelude::*;
+use bevy::{prelude::*, app::AppExit};
 
 use crate::renderer::types::RenderScene;
 
 pub fn receive_input(
     mut render_scene: ResMut<RenderScene>,
     keyboard_input: Res<Input<KeyCode>>,
+    mut exit: EventWriter<AppExit>,
 ) {
     // Sun Rotation
 
@@ -19,4 +20,8 @@ pub fn receive_input(
         * Quat::from_axis_angle(Vec3::Y.cross(render_scene.sun_direction), -dr.y)
         * render_scene.sun_direction
     ).normalize();
+
+    if keyboard_input.just_pressed(KeyCode::Escape) {
+        exit.send(AppExit);
+    }
 }
