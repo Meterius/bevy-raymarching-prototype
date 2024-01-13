@@ -114,7 +114,8 @@ fn render_hit(ray: Ray, hit: RayMarchHit) -> vec3<f32> {
 
 fn render_ray(ray: Ray) -> vec3<f32> {
     let hit = ray_march(ray);
-    return render_hit(ray, hit);
+    return vec3<f32>(hit.depth * 0.001);
+    // return render_hit(ray, hit);
 }
 
 fn render_pixel(texture_coord: vec2<i32>) -> vec3<f32> {
@@ -142,11 +143,11 @@ fn render_pixel(texture_coord: vec2<i32>) -> vec3<f32> {
     }
 }
 
-@compute @workgroup_size(32, 32, 1)
+@compute @workgroup_size(8, 8, 1)
 fn init(@builtin(global_invocation_id) invocation_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
 }
 
-@compute @workgroup_size(32, 32, 1)
+@compute @workgroup_size(8, 8, 1)
 fn update(
     @builtin(global_invocation_id) invocation_id: vec3<u32>,
     @builtin(local_invocation_id) local_invocation_id: vec3<u32>
@@ -154,19 +155,18 @@ fn update(
     let texture_coord = invocation_id_to_texture_coord(invocation_id);
     let viewport_coord = texture_coord_to_viewport_coord(vec2<f32>(texture_coord));
 
-    is_main_invocation = local_invocation_id.x == 16u && local_invocation_id.y == 16u;
+    is_main_invocation = local_invocation_id.x == 4u && local_invocation_id.y == 4u;
 
     var color: vec3<f32>;
     if is_main_invocation {
         color = render_pixel(texture_coord);
     }
 
-    workgroupBarrier();
-
     if (!is_main_invocation) {
         color = render_pixel(texture_coord);
+    } else {
+        color = vec3<f32>(1.0, 0.0, 0.0);
     }
-
 
     // let color = vec3<f32>(viewport_coord * vec2<f32>(0.5) + vec2<f32>(0.5), 0.0);
 
@@ -174,5 +174,11 @@ fn update(
         color = color_map_temp(0.5 * viewport_coord.x + 0.5) * vec3<f32>(f32(viewport_coord.y <= -0.95));
     }
 
-    textureStore(TEXTURE, texture_coord, vec4<f32>(hdr_map_aces_tone(color), 1.0));
+    color = hdr_map_aces_tone(color);
+
+    if (pixel_color_override.x != -1.0) {
+        color = pixel_color_override;
+    }
+
+    textureStore(TEXTURE, texture_coord, vec4<f32>(color, 1.0));
 }

@@ -20,7 +20,7 @@ use self::types::{RenderSDCompoundNode, RenderSDPrimitiveNode};
 pub mod types;
 
 const RENDER_TEXTURE_SIZE: (u32, u32) = (2560, 1440);
-const WORKGROUP_SIZE: u32 = 32;
+const WORKGROUP_SIZE: u32 = 8;
 
 #[derive(Debug, Clone, Default, Component)]
 pub struct RenderCameraTarget {}
