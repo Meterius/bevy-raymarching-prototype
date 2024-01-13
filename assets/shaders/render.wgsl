@@ -4,6 +4,9 @@
 #import "shaders/compiled/color.wgsl"::{color_map_default, hdr_map_aces_tone, color_map_temp}
 #import "shaders/compiled/utils.wgsl"::{PI}
 
+var<private> is_main_invocation: bool;
+var<private> pixel_color_override: vec3<f32> = vec3<f32>(-1.0, -1.0, -1.0);
+
 //
 
 fn invocation_id_to_texture_coord(invocation_id: vec3<u32>) -> vec2<i32> {
@@ -144,11 +147,27 @@ fn init(@builtin(global_invocation_id) invocation_id: vec3<u32>, @builtin(num_wo
 }
 
 @compute @workgroup_size(32, 32, 1)
-fn update(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
+fn update(
+    @builtin(global_invocation_id) invocation_id: vec3<u32>,
+    @builtin(local_invocation_id) local_invocation_id: vec3<u32>
+) {
     let texture_coord = invocation_id_to_texture_coord(invocation_id);
     let viewport_coord = texture_coord_to_viewport_coord(vec2<f32>(texture_coord));
 
-    var color = render_pixel(texture_coord);
+    is_main_invocation = local_invocation_id.x == 16u && local_invocation_id.y == 16u;
+
+    var color: vec3<f32>;
+    if is_main_invocation {
+        color = render_pixel(texture_coord);
+    }
+
+    workgroupBarrier();
+
+    if (!is_main_invocation) {
+        color = render_pixel(texture_coord);
+    }
+
+
     // let color = vec3<f32>(viewport_coord * vec2<f32>(0.5) + vec2<f32>(0.5), 0.0);
 
     if (viewport_coord.y <= -0.9) {
