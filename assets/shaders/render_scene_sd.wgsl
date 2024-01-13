@@ -4,103 +4,59 @@
 
 // Runtime Scene
 
-const SD_RUNTIME_HIERARCHY_MAX_DEPTH = 16;
+const SD_RUNTIME_SCENE_NODES = 8;
 
-struct SdRuntimePathNode {
-    content: RenderSDReference,
-    point: vec3<f32>,
-    child_index: i32,
-    current_sd: f32,
-}
+var<private> rs_compute_nodes: array<RsComputeNode, SD_RUNTIME_SCENE_NODES> = array<RsComputeNode, SD_RUNTIME_SCENE_NODES>();
 
-fn sd_runtime_object(root_point: vec3<f32>, root: RenderSDReference) -> f32 {
-    var path = array<SdRuntimePathNode, SD_RUNTIME_HIERARCHY_MAX_DEPTH>();
-    var path_index = 0;
-
-    path[0].content = root;
-    path[0].point = root_point;
-    path[0].child_index = 0;
-    path[0].current_sd = 0.0;
-
-    var child_sd = MAX_POSITIVE_F32;
-
-    while (path_index >= 0) {
-        if path_index >= SD_RUNTIME_HIERARCHY_MAX_DEPTH {
-            return 0.0;
-        }
-
-        let node = path[path_index];
-
-        switch node.content.variant {
-            case 1 {
-                child_sd = sdSphere(node.point, vec3<f32>(0.0), SD_SPHERES[node.content.index].radius);
-                path_index -= 1;
-            }
-            case 2 {
-                child_sd = sdBox(node.point, vec3<f32>(0.0), SD_BOXES[node.content.index].size);
-                path_index -= 1;
-            }
-            case 3 {
-                if node.child_index == 0 {
-                    path[path_index].child_index += 1;
-                    path[path_index + 1] = SdRuntimePathNode(
-                        SD_TRANSFORMS[node.content.index].content,
-                        (node.point - SD_TRANSFORMS[node.content.index].translation) / SD_TRANSFORMS[node.content.index].scale,
-                        0,
-                        0.0,
-                    );
-
-                    path_index += 1;
-                } else {
-                    child_sd = child_sd * min_comp3(abs(SD_TRANSFORMS[node.content.index].scale));
-                    path_index -= 1;
-                }
-            }
-            case 4 {
-                if node.child_index < 2 {
-                    var child_ref: RenderSDReference;
-
-                    if node.child_index == 0 {
-                        child_ref = SD_UNIONS[node.content.index].first;
-                    } else {
-                        path[path_index].current_sd = child_sd;
-                        child_ref = SD_UNIONS[node.content.index].second;
-                    }
-
-                    path[path_index].child_index += 1;
-                    path[path_index + 1] = SdRuntimePathNode(
-                        child_ref,
-                        node.point,
-                        0,
-                        0.0,
-                    );
-
-                    path_index += 1;
-                } else {
-                    child_sd = min(node.current_sd, child_sd);
-                    path_index -= 1;
-                }
-            }
-            default: {
-                return 0.0;
-            }
-        }
-    }
-
-    return child_sd;
+struct RsComputeNode {
+    position: vec3<f32>,
+    sd: f32,
 }
 
 fn sd_runtime_scene(p: vec3<f32>) -> f32 {
     var sd = MAX_POSITIVE_F32;
 
-    let ref_count = i32(1);
-    for (var i = 0; i < ref_count; i += 1) {
-        sd = min(
-            sd, sd_runtime_object(p, SD_ROOTS[i]),
-        );
+    if (true) {
+        return sd;
     }
 
-    return sd;
+    rs_compute_nodes[SD_SCENE.compound_count].position = p;
+
+    for (var i = 0; i < SD_SCENE.compound_count; i++) {
+        rs_compute_nodes[i].position = (
+            rs_compute_nodes[SD_SCENE.compounds[i].parent].position
+            - SD_SCENE.compounds[i].pre_translation
+        ) / SD_SCENE.compounds[i].pre_scale;
+    }
+
+    for (var i = 0; i < SD_SCENE.primitive_count; i++) {
+        if SD_SCENE.primitives[i].use_sphere == 0 {
+            rs_compute_nodes[
+                SD_SCENE.primitives[i].container
+            ].sd = sdBox(
+                rs_compute_nodes[
+                    SD_SCENE.primitives[i].container
+                ].position, vec3<f32>(0.0), SD_SCENE.primitives[i].block,
+            );
+        } else {
+            rs_compute_nodes[
+                SD_SCENE.primitives[i].container
+            ].sd = sdSphere(
+                rs_compute_nodes[
+                    SD_SCENE.primitives[i].container
+                ].position, vec3<f32>(0.0), SD_SCENE.primitives[i].sphere,
+            );
+        }
+    }
+
+    for (var i = SD_SCENE.compound_count - 1; i >= 0; i--) {
+        rs_compute_nodes[i].sd = min(
+            rs_compute_nodes[ SD_SCENE.compounds[i].children[0] ].sd,
+            rs_compute_nodes[ SD_SCENE.compounds[i].children[1] ].sd
+        ) * SD_SCENE.compounds[i].post_scale;
+    }
+
+    return rs_compute_nodes[0].sd;
 }
 
 // Scene
@@ -182,13 +138,69 @@ fn sd_scene(p: vec3<f32>) -> SdSceneData {
 
     let sd_axes = MAX_POSITIVE_F32; // sd_scene_axes(q);
 
+    var b = 0.0;
+    var a = sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0));
+
+    b += 1.0;
+    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
+        b += 1.0;
+    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
+        b += 1.0;
+    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
+        b += 1.0;
+    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
+        b += 1.0;
+    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
+        b += 1.0;
+    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
+        b += 1.0;
+    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
+        b += 1.0;
+    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
+        b += 1.0;
+    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
+        b += 1.0;
+    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
+        b += 1.0;
+    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
+        b += 1.0;
+    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
+        b += 1.0;
+    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
+        b += 1.0;
+    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
+        b += 1.0;
+    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
+        b += 1.0;
+    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
+        b += 1.0;
+    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
+        b += 1.0;
+    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
+            b += 1.0;
+    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
+        b += 1.0;
+    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
+        b += 1.0;
+    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
+        b += 1.0;
+    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
+        b += 1.0;
+    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
+        b += 1.0;
+    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
+        b += 1.0;
+
     // Plane
 
-    let sd_plane = q.y;
+    let sd_plane = MAX_POSITIVE_F32;
 
     let sd_runtime_scene = sd_runtime_scene(q);
 
-    return SdSceneData(min(sd_axes, min(sd_runtime_scene, sd_plane)), 0.0);
+    let qt = abs(q - vec3<f32>(4.0, 5.0, 4.0)) - vec3<f32>(1.0, 1.0, 1.0);
+    let rounded_box = length(max(qt, vec3<f32>(0.0))) + min(max(q.x, max(q.y, q.z)), 0.0) - 0.5;
+
+    return SdSceneData(min(min(min(a, sd_axes), rounded_box), min(sd_runtime_scene, sd_plane)), 0.0);
 
     // return SdSceneData(min(
     //     sdPostSmoothUnion(

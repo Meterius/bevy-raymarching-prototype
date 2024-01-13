@@ -280,6 +280,9 @@ fn convert_shader_field_type(ty: &syn::Type) -> String {
 
     if type_name.starts_with("Vec < ") && type_name.ends_with(" >") {
         format!("array<{}>", &type_name[6..type_name.len() - 2])
+    } else if type_name.starts_with("[") && type_name.ends_with("]") {
+        let mut split = type_name[1..type_name.len() - 1].split(" ; ");
+        format!("array<{}, {}>", split.next().unwrap(), split.next().unwrap())
     } else {
         type_name
     }

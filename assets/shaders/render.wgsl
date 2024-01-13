@@ -139,11 +139,11 @@ fn render_pixel(texture_coord: vec2<i32>) -> vec3<f32> {
     }
 }
 
-@compute @workgroup_size(8, 8, 1)
+@compute @workgroup_size(32, 32, 1)
 fn init(@builtin(global_invocation_id) invocation_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
 }
 
-@compute @workgroup_size(8, 8, 1)
+@compute @workgroup_size(32, 32, 1)
 fn update(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let texture_coord = invocation_id_to_texture_coord(invocation_id);
     let viewport_coord = texture_coord_to_viewport_coord(vec2<f32>(texture_coord));

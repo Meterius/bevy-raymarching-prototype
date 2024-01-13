@@ -27,57 +27,51 @@ pub struct RenderCamera {
 
 /* Signed-Distance Types */
 
-// Elements Primitives
+// Command-Encoding
 
-#[derive(Clone, Copy, Debug, Default, ShaderType)]
-pub struct RenderSDSphere {
-    pub radius: f32,
+#[derive(Clone, Debug, Default, ShaderType)]
+pub struct RenderSDScene {
+    pub compound_count: i32,
+    pub compounds: [RenderSDCompoundNode; 32],
+
+    pub primitive_count: i32,
+    pub primitives: [RenderSDPrimitiveNode; 32],
 }
 
+#[derive(Clone, Copy, Debug, ShaderType)]
+pub struct RenderSDCompoundNode {
+    // pre-transforming
+    pub pre_translation: Vec3,
+    pub pre_scale: Vec3,
 
-#[derive(Clone, Copy, Debug, Default, ShaderType)]
-pub struct RenderSDBox {
-    pub size: Vec3,
+    // post-transforming
+    pub post_scale: f32,
+
+    // relations
+    pub parent: i32,
+    pub children: [i32; 2],
 }
 
-// Element Compounds
-
-#[derive(Clone, Copy, Debug, Default, ShaderType)]
-pub struct RenderSDTransform {
-    pub translation: Vec3,
-    pub scale: Vec3,
-
-    pub content: RenderSDReference,
-}
-
-#[derive(Clone, Copy, Debug, Default, ShaderType)]
-pub struct RenderSDUnion {
-    pub first: RenderSDReference,
-    pub second: RenderSDReference,
-}
-
-// Element Object
-
-pub enum RenderSDReferenceType {
-    Sphere,
-    Box,
-    Transform,
-    Union,
-}
-
-impl RenderSDReferenceType {
-    pub fn as_i32(&self) -> i32 {
-        match self {
-            RenderSDReferenceType::Sphere => 1,
-            RenderSDReferenceType::Box => 2,
-            RenderSDReferenceType::Transform => 3,
-            RenderSDReferenceType::Union => 4,
+impl Default for RenderSDCompoundNode {
+    fn default() -> Self {
+        Self {
+            pre_translation: Vec3::ZERO,
+            pre_scale: Vec3::ONE,
+            post_scale: 1.0,
+            parent: -1,
+            children: [-1, -1],
         }
     }
 }
 
 #[derive(Clone, Copy, Debug, Default, ShaderType)]
-pub struct RenderSDReference {
-    pub variant: i32,
-    pub index: i32,
+pub struct RenderSDPrimitiveNode {
+    pub use_sphere: i32,
+    pub sphere: f32,
+
+    pub use_block: i32,
+    pub block: Vec3,
+
+    // output
+    pub container: i32,
 }
