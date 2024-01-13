@@ -1,6 +1,21 @@
-#import "shaders/compiled/utils.wgsl"::{min3, min4, min5, wrap, wrap_cell}
+#import "shaders/compiled/utils.wgsl"::{min3, min4, min5, wrap, wrap_cell, MAX_POSITIVE_F32}
 #import "shaders/compiled/phong_reflection_model.wgsl"::{PhongReflectionMaterial}
 #import "shaders/compiled/signed_distance.wgsl"::{sdSphere, sdUnion, sdPostSmoothUnion, sdRecursiveTetrahedron, sdBox, sdPreCheapBend, sdPreMirrorB}
+
+// Runtime Scene
+
+fn sd_runtime_scene(p: vec3<f32>) -> f32 {
+    var sd = MAX_POSITIVE_F32;
+
+    let sphere_count = i32(arrayLength(&SD_SPHERES));
+    for (var i = 0; i < sphere_count; i += 1) {
+        sd = min(
+            sd, sdSphere(p, vec3<f32>(0.0), SD_SPHERES[i].radius),
+        );
+    }
+
+    return sd;
+}
 
 // Scene
 
@@ -85,7 +100,9 @@ fn sd_scene(p: vec3<f32>) -> SdSceneData {
 
     let sd_plane = q.y;
 
-    return SdSceneData(min(sd_axes, sd_plane), 0.0);
+    let sd_runtime_scene = sd_runtime_scene(q);
+
+    return SdSceneData(min(min(sd_axes, sd_runtime_scene), sd_plane), 0.0);
 
     // return SdSceneData(min(
     //     sdPostSmoothUnion(

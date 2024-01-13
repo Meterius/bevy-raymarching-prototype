@@ -1,4 +1,4 @@
-use crate::renderer::types::{RenderCamera, RenderGlobals, RenderScene};
+use crate::renderer::types::{RenderCamera, RenderGlobals, RenderScene, RenderSDBox, RenderSDReference, RenderSDTransform, RenderSDReferenceType, RenderSDObject, RenderSDUnion, RenderSDSphere};
 use bevy::core_pipeline::clear_color::ClearColorConfig;
 use bevy::render::renderer::RenderQueue;
 use bevy::window::PrimaryWindow;
@@ -24,10 +24,18 @@ const WORKGROUP_SIZE: u32 = 8;
 pub struct RenderCameraTarget {}
 
 #[derive(Resource)]
-pub struct RenderBuffers {
+pub struct RenderCommonBuffers {
     globals_buffer: UniformBuffer<RenderGlobals>,
     camera_buffer: UniformBuffer<RenderCamera>,
     scene_buffer: UniformBuffer<RenderScene>,
+}
+
+#[derive(Resource)]
+pub struct RenderSdBuffers {
+    object_buffer: StorageBuffer<Vec<RenderSDObject>>,
+    sphere_buffer: StorageBuffer<Vec<RenderSDSphere>>,
+    box_buffer: StorageBuffer<Vec<RenderSDBox>>,
+    union_buffer: StorageBuffer<Vec<RenderSDUnion>>,
 }
 
 #[derive(Clone, Debug, Default, Component)]
@@ -37,7 +45,7 @@ pub struct RenderTargetSprite {}
 struct RenderTargetImage(Handle<Image>);
 
 #[derive(Resource)]
-struct RenderBindGroup(BindGroup);
+struct RenderBindGroup(BindGroup, BindGroup);
 
 // App Systems
 
@@ -121,45 +129,104 @@ fn synchronize_camera(
 }
 // Render Systems
 
+macro_rules! init_buffers {
+    (
+        $render_device: ident, $render_queue: ident, $buffers_type: tt, $commands: ident;
+        $($name: ident, $data_name: ident, $buffer_type: tt;)+
+    ) => {
+        $(
+            let mut $name = $buffer_type :: from($data_name.clone());
+            $name.write_buffer(& $render_device, & $render_queue);
+        )+
+
+        $commands.insert_resource($buffers_type {
+            $($name),+
+        });
+    };
+}
+
+macro_rules! update_buffers {
+    (
+        $render_device: ident, $render_queue: ident, $buffers: ident;
+        $($name: ident, $data_name: ident;)+
+    ) => {
+        $(
+            $buffers.$name.set($data_name.clone());
+            $buffers
+                .$name
+                .write_buffer(& $render_device, & $render_queue);
+        )+
+    };
+}
+
 fn setup_buffers(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
-    buffers: Option<ResMut<RenderBuffers>>,
+    
+    common_buffers: Option<ResMut<RenderCommonBuffers>>,
+    sd_buffers: Option<ResMut<RenderSdBuffers>>,
+
     render_globals: Res<RenderGlobals>,
     render_camera: Res<RenderCamera>,
     render_scene: Res<RenderScene>,
     render_queue: Res<RenderQueue>,
 ) {
-    if let Some(mut buffers) = buffers {
-        buffers.globals_buffer.set(render_globals.clone());
-        buffers
-            .globals_buffer
-            .write_buffer(&render_device, &render_queue);
-
-        buffers.camera_buffer.set(render_camera.clone());
-        buffers
-            .camera_buffer
-            .write_buffer(&render_device, &render_queue);
-
-        buffers.scene_buffer.set(render_scene.clone());
-        buffers
-            .scene_buffer
-            .write_buffer(&render_device, &render_queue);
+    if let Some(mut common_buffers) = common_buffers {
+        update_buffers!(
+            render_device, render_queue, common_buffers;
+            globals_buffer, render_globals;
+            camera_buffer, render_camera;
+            scene_buffer, render_scene;
+        );
     } else {
-        let mut camera_buffer: UniformBuffer<RenderCamera> = UniformBuffer::from(render_camera.clone());
-        camera_buffer.write_buffer(&render_device, &render_queue);
+        init_buffers!(
+            render_device, render_queue, RenderCommonBuffers, commands;
+            globals_buffer, render_globals, UniformBuffer;
+            camera_buffer, render_camera, UniformBuffer;
+            scene_buffer, render_scene, UniformBuffer;
+        );
+    }
 
-        let mut scene_buffer: UniformBuffer<RenderScene> = UniformBuffer::from(render_scene.clone());
-        scene_buffer.write_buffer(&render_device, &render_queue);
+    let sd_objects = vec![RenderSDObject {
+        transform: RenderSDTransform::default(),
+        content: RenderSDReference { variant: 1, index: 0 },
+    }];
 
-        let mut globals_buffer: UniformBuffer<RenderGlobals> = UniformBuffer::from(render_globals.clone());
-        globals_buffer.write_buffer(&render_device, &render_queue);
+    let sd_spheres = vec![RenderSDSphere {
+        radius: 1.0,
+    }];
 
-        commands.insert_resource(RenderBuffers {
-            camera_buffer,
-            scene_buffer,
-            globals_buffer,
-        });
+    let sd_boxes = vec![RenderSDBox {
+        size: Vec3::ONE,
+    }];
+
+    let sd_unions = vec![RenderSDUnion {
+        first: RenderSDObject {
+            transform: RenderSDTransform::default(),
+            content: RenderSDReference { variant: 1, index: 0 },
+        },
+        second: RenderSDObject {
+            transform: RenderSDTransform::default(),
+            content: RenderSDReference { variant: 1, index: 0 },
+        },
+    }];
+
+    if let Some(mut sd_buffers) = sd_buffers {
+        update_buffers!(
+            render_device, render_queue, sd_buffers;
+            object_buffer, sd_objects;
+            sphere_buffer, sd_spheres;
+            box_buffer, sd_boxes;
+            union_buffer, sd_unions;
+        );
+    } else {
+        init_buffers!(
+            render_device, render_queue, RenderSdBuffers, commands;
+            object_buffer, sd_objects, StorageBuffer;
+            sphere_buffer, sd_spheres, StorageBuffer;
+            box_buffer, sd_boxes, StorageBuffer;
+            union_buffer, sd_unions, StorageBuffer;
+        );
     }
 }
 
@@ -168,14 +235,15 @@ fn prepare_bind_group(
     pipeline: Res<RayMarcherPipeline>,
     gpu_images: Res<RenderAssets<Image>>,
     render_image: Res<RenderTargetImage>,
-    render_buffers: Res<RenderBuffers>,
+    render_common_buffers: Res<RenderCommonBuffers>,
+    render_sd_buffers: Res<RenderSdBuffers>,
     render_device: Res<RenderDevice>,
 ) {
     let view = gpu_images.get(&render_image.0).unwrap();
 
-    let bind_group = render_device.create_bind_group(
+    let common_bind_group = render_device.create_bind_group(
         None,
-        &pipeline.bind_group_layout,
+        &pipeline.common_bind_group_layout,
         &[
             BindGroupEntry {
                 binding: 0,
@@ -183,34 +251,89 @@ fn prepare_bind_group(
             },
             BindGroupEntry {
                 binding: 1,
-                resource: render_buffers.globals_buffer.binding().unwrap(),
+                resource: render_common_buffers.globals_buffer.binding().unwrap(),
             },
             BindGroupEntry {
                 binding: 2,
-                resource: render_buffers.camera_buffer.binding().unwrap(),
+                resource: render_common_buffers.camera_buffer.binding().unwrap(),
             },
             BindGroupEntry {
                 binding: 3,
-                resource: render_buffers.scene_buffer.binding().unwrap(),
+                resource: render_common_buffers.scene_buffer.binding().unwrap(),
             },
         ],
     );
 
-    commands.insert_resource(RenderBindGroup(bind_group));
+    let sd_bind_group = render_device.create_bind_group(
+        None,
+        &pipeline.sd_bind_group_layout,
+        &[
+            BindGroupEntry {
+                binding: 0,
+                resource: render_sd_buffers.object_buffer.binding().unwrap(),
+            },
+            BindGroupEntry {
+                binding: 1,
+                resource: render_sd_buffers.sphere_buffer.binding().unwrap(),
+            },
+            BindGroupEntry {
+                binding: 2,
+                resource: render_sd_buffers.box_buffer.binding().unwrap(),
+            },
+            BindGroupEntry {
+                binding: 3,
+                resource: render_sd_buffers.union_buffer.binding().unwrap(),
+            },
+        ],
+    );
+
+    commands.insert_resource(RenderBindGroup(common_bind_group, sd_bind_group));
 }
 
 // Render Pipeline
 
 #[derive(Resource)]
 pub struct RayMarcherPipeline {
-    bind_group_layout: BindGroupLayout,
+    common_bind_group_layout: BindGroupLayout,
+    sd_bind_group_layout: BindGroupLayout,
     init_pipeline: CachedComputePipelineId,
     update_pipeline: CachedComputePipelineId,
 }
 
+macro_rules! group_layout_entry_uniform {
+    ($idx: tt) => {
+        BindGroupLayoutEntry {
+            binding: $idx,
+            visibility: ShaderStages::COMPUTE,
+            ty: BindingType::Buffer {
+                ty: BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }
+    }
+}
+
+macro_rules! group_layout_entry_storage {
+    ($idx: tt) => {
+        BindGroupLayoutEntry {
+            binding: $idx,
+            visibility: ShaderStages::COMPUTE,
+            ty: BindingType::Buffer {
+                ty: BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }
+    }
+}
+
+
 impl FromWorld for RayMarcherPipeline {
     fn from_world(world: &mut World) -> Self {
-        let bind_group_layout =
+        let common_bind_group_layout =
             world
                 .resource::<RenderDevice>()
                 .create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -226,38 +349,24 @@ impl FromWorld for RayMarcherPipeline {
                             },
                             count: None,
                         },
-                        BindGroupLayoutEntry {
-                            binding: 1,
-                            visibility: ShaderStages::COMPUTE,
-                            ty: BindingType::Buffer {
-                                ty: BufferBindingType::Uniform,
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        BindGroupLayoutEntry {
-                            binding: 2,
-                            visibility: ShaderStages::COMPUTE,
-                            ty: BindingType::Buffer {
-                                ty: BufferBindingType::Uniform,
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        BindGroupLayoutEntry {
-                            binding: 3,
-                            visibility: ShaderStages::COMPUTE,
-                            ty: BindingType::Buffer {
-                                ty: BufferBindingType::Uniform,
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
+                        group_layout_entry_uniform!(1),
+                        group_layout_entry_uniform!(2),
+                        group_layout_entry_uniform!(3),
                     ],
                 });
+
+            let sd_bind_group_layout =
+                world
+                    .resource::<RenderDevice>()
+                    .create_bind_group_layout(&BindGroupLayoutDescriptor {
+                        label: None,
+                        entries: &[
+                            group_layout_entry_storage!(0),
+                            group_layout_entry_storage!(1),
+                            group_layout_entry_storage!(2),
+                            group_layout_entry_storage!(3),
+                        ],
+                    });
 
         let shader = world
             .resource::<AssetServer>()
@@ -266,7 +375,7 @@ impl FromWorld for RayMarcherPipeline {
         let pipeline_cache = world.resource::<PipelineCache>();
         let init_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
             label: None,
-            layout: vec![bind_group_layout.clone()],
+            layout: vec![common_bind_group_layout.clone(), sd_bind_group_layout.clone()],
             push_constant_ranges: Vec::new(),
             shader: shader.clone(),
             shader_defs: vec![],
@@ -274,7 +383,7 @@ impl FromWorld for RayMarcherPipeline {
         });
         let update_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
             label: None,
-            layout: vec![bind_group_layout.clone()],
+            layout: vec![common_bind_group_layout.clone(), sd_bind_group_layout.clone()],
             push_constant_ranges: Vec::new(),
             shader,
             shader_defs: vec![],
@@ -282,7 +391,8 @@ impl FromWorld for RayMarcherPipeline {
         });
 
         RayMarcherPipeline {
-            bind_group_layout,
+            common_bind_group_layout,
+            sd_bind_group_layout,
             init_pipeline,
             update_pipeline,
         }
@@ -342,11 +452,12 @@ impl render_graph::Node for RayMarcherNode {
             .command_encoder()
             .begin_compute_pass(&ComputePassDescriptor::default());
 
-        let bind_group = &world.resource::<RenderBindGroup>().0;
+        let RenderBindGroup(common_bind_group, sd_bind_group) = &world.resource::<RenderBindGroup>();
         let pipeline_cache = world.resource::<PipelineCache>();
         let pipeline = world.resource::<RayMarcherPipeline>();
 
-        pass.set_bind_group(0, bind_group, &[]);
+        pass.set_bind_group(0, common_bind_group, &[]);
+        pass.set_bind_group(1, sd_bind_group, &[]);
 
         // select the pipeline based on the current state
         match self.state {

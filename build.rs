@@ -268,41 +268,44 @@ fn is_shader_struct(item: &syn::ItemStruct) -> bool {
 
 use quote::ToTokens;
 
+fn convert_shader_field_type(ty: &syn::Type) -> String {
+    let type_name = format!("{}", ty.to_token_stream());
+
+    match type_name.as_str() {
+        "Vec2" => return String::from("vec2<f32>"),
+        "Vec3" => return String::from("vec3<f32>"),
+        "Vec4" => return String::from("vec4<f32>"),
+        _ => {},
+    };
+
+    if type_name.starts_with("Vec < ") && type_name.ends_with(" >") {
+        format!("array<{}>", &type_name[6..type_name.len() - 2])
+    } else {
+        type_name
+    }
+}
+
+fn generate_struct(def: &syn::ItemStruct, result: &mut String) {
+    result.push_str(format!("struct {} {{\n", def.ident).as_str());
+
+    def.fields.iter().for_each(|field| {
+        let translated_type_name = convert_shader_field_type(&field.ty);
+        result.push_str(format!("\t{}: {},\n", field.ident.as_ref().unwrap(), translated_type_name).as_str());
+    });
+
+    result.push_str("}\n\n");
+}
+
 fn compile_shader_structs() {
     let ast = syn::parse_file(include_str!("src/renderer/types.rs")).unwrap();
 
     let mut result = String::new();
 
-    let mut type_translation = std::collections::HashMap::<String, String>::new();
-    type_translation.insert(String::from("f32"), String::from("f32"));
-    type_translation.insert(String::from("Vec2"), String::from("vec2<f32>"));
-    type_translation.insert(String::from("Vec3"), String::from("vec3<f32>"));
-
     ast.items.iter().for_each(|item| {
         match item {
             syn::Item::Struct(def) => {
                 if !is_shader_struct(def) { return; }
-
-                result.push_str(format!("struct {} {{\n", def.ident).as_str());
-
-                def.fields.iter().for_each(|field| {
-                    let type_name = format!("{}", field.ty.to_token_stream());
-
-                    let translated_type_name = {
-                        let type_name = if type_name.starts_with("Vec < ") && type_name.ends_with(" >") {
-                            format!("array<{}>", &type_name.as_str()[6..type_name.len() - 2])
-                        } else { type_name };
-                        
-                        type_translation
-                            .get(type_name.as_str())
-                            .unwrap_or(&type_name)
-                            .clone()
-                    };
-
-                    result.push_str(format!("\t{}: {},\n", field.ident.as_ref().unwrap(), translated_type_name).as_str());
-                });
-
-                result.push_str("}\n\n");
+                generate_struct(&def, &mut result);
             },
             _ => {},
         };
