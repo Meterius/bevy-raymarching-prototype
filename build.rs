@@ -182,6 +182,8 @@ fn compile_shaders() {
         }
     });
 
+    let buffers_content = include_str!("assets/shaders/render_buffers.wgsl");
+
     // replace macro functions
     visit_dirs(root, &mut |path: &Path, contents: &str| {
         if !is_valid_file(path) {
@@ -216,6 +218,18 @@ fn compile_shaders() {
             result.replace_range(start_index..=call_end_index, content.as_str());
 
             index = call_end_index + 1;
+        }
+
+        result = result.replace("// DIRECTIVE import_buffers", buffers_content);
+        
+        if path == Path::new("assets/shaders/render.wgsl") {
+            result.push_str("\n");
+            result.push_str(include_str!("assets/shaders/render_buffers.wgsl"));
+            result.push_str("\n");
+            result.push_str(include_str!("assets/shaders/render_ray_marching.wgsl"));
+            result.push_str("\n");
+            result.push_str(include_str!("assets/shaders/render_scene_sd.wgsl"));
+            result.push_str("\n");
         }
 
         write_to_file(

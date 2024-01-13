@@ -1,4 +1,4 @@
-use crate::renderer::RayMarcherCamera;
+use crate::renderer::RenderCameraTarget;
 use bevy::prelude::*;
 use bevy_flycam::FlyCam;
 
@@ -38,6 +38,6 @@ pub fn setup_scene(
             ..default()
         },
         FlyCam,
-        RayMarcherCamera::default(),
+        RenderCameraTarget::default(),
     ));
 }

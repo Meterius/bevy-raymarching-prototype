@@ -17,27 +17,27 @@ use std::borrow::Cow;
 
 pub mod types;
 
-pub const RENDER_TEXTURE_SIZE: (u32, u32) = (2560, 1440);
+const RENDER_TEXTURE_SIZE: (u32, u32) = (2560, 1440);
 const WORKGROUP_SIZE: u32 = 8;
 
 #[derive(Debug, Clone, Default, Component)]
-pub struct RayMarcherCamera {}
+pub struct RenderCameraTarget {}
 
 #[derive(Resource)]
-pub struct RayMarcherBuffers {
+pub struct RenderBuffers {
     globals_buffer: UniformBuffer<RenderGlobals>,
     camera_buffer: UniformBuffer<RenderCamera>,
     scene_buffer: UniformBuffer<RenderScene>,
 }
 
-#[derive(Debug, Clone, Default, Component)]
-pub struct RayMarcherTargetSprite {}
+#[derive(Clone, Debug, Default, Component)]
+pub struct RenderTargetSprite {}
 
 #[derive(Clone, Resource, ExtractResource, Deref)]
-struct RayMarcherTargetImage(Handle<Image>);
+struct RenderTargetImage(Handle<Image>);
 
 #[derive(Resource)]
-struct RayMarcherBindGroup(BindGroup);
+struct RenderBindGroup(BindGroup);
 
 // App Systems
 
@@ -69,7 +69,7 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
             texture: image.clone(),
             ..default()
         },
-        RayMarcherTargetSprite::default(),
+        RenderTargetSprite::default(),
     ));
     commands.spawn(Camera2dBundle {
         camera: Camera {
@@ -83,11 +83,13 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
         ..default()
     });
 
-    commands.insert_resource(RayMarcherTargetImage(image));
+    commands.insert_resource(RenderTargetImage(image));
 }
 
-fn scale_target_to_screen(
-    mut sprite: Query<&mut Transform, With<RayMarcherTargetSprite>>,
+// Synchronization
+
+fn synchronize_target_sprite(
+    mut sprite: Query<&mut Transform, With<RenderTargetSprite>>,
     window: Query<&Window, With<PrimaryWindow>>,
 ) {
     sprite.single_mut().scale = Vec2::new(
@@ -97,8 +99,6 @@ fn scale_target_to_screen(
     .extend(1.0);
 }
 
-// Synchronization
-
 fn synchronize_globals(
     mut render_globals: ResMut<RenderGlobals>,
     time: Res<Time>,
@@ -107,7 +107,7 @@ fn synchronize_globals(
 }
 
 fn synchronize_camera(
-    camera: Query<(&Camera, &GlobalTransform), With<RayMarcherCamera>>,
+    camera: Query<(&Camera, &GlobalTransform), With<RenderCameraTarget>>,
     mut render_camera: ResMut<RenderCamera>,
 ) {
     let (cam, cam_transform) = camera.single();
@@ -124,7 +124,7 @@ fn synchronize_camera(
 fn setup_buffers(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
-    buffers: Option<ResMut<RayMarcherBuffers>>,
+    buffers: Option<ResMut<RenderBuffers>>,
     render_globals: Res<RenderGlobals>,
     render_camera: Res<RenderCamera>,
     render_scene: Res<RenderScene>,
@@ -155,7 +155,7 @@ fn setup_buffers(
         let mut globals_buffer: UniformBuffer<RenderGlobals> = UniformBuffer::from(render_globals.clone());
         globals_buffer.write_buffer(&render_device, &render_queue);
 
-        commands.insert_resource(RayMarcherBuffers {
+        commands.insert_resource(RenderBuffers {
             camera_buffer,
             scene_buffer,
             globals_buffer,
@@ -167,15 +167,15 @@ fn prepare_bind_group(
     mut commands: Commands,
     pipeline: Res<RayMarcherPipeline>,
     gpu_images: Res<RenderAssets<Image>>,
-    image: Res<RayMarcherTargetImage>,
-    buffers: Res<RayMarcherBuffers>,
+    render_image: Res<RenderTargetImage>,
+    render_buffers: Res<RenderBuffers>,
     render_device: Res<RenderDevice>,
 ) {
-    let view = gpu_images.get(&image.0).unwrap();
+    let view = gpu_images.get(&render_image.0).unwrap();
 
     let bind_group = render_device.create_bind_group(
         None,
-        &pipeline.texture_bind_group_layout,
+        &pipeline.bind_group_layout,
         &[
             BindGroupEntry {
                 binding: 0,
@@ -183,34 +183,34 @@ fn prepare_bind_group(
             },
             BindGroupEntry {
                 binding: 1,
-                resource: buffers.globals_buffer.binding().unwrap(),
+                resource: render_buffers.globals_buffer.binding().unwrap(),
             },
             BindGroupEntry {
                 binding: 2,
-                resource: buffers.camera_buffer.binding().unwrap(),
+                resource: render_buffers.camera_buffer.binding().unwrap(),
             },
             BindGroupEntry {
                 binding: 3,
-                resource: buffers.scene_buffer.binding().unwrap(),
+                resource: render_buffers.scene_buffer.binding().unwrap(),
             },
         ],
     );
 
-    commands.insert_resource(RayMarcherBindGroup(bind_group));
+    commands.insert_resource(RenderBindGroup(bind_group));
 }
 
 // Render Pipeline
 
 #[derive(Resource)]
 pub struct RayMarcherPipeline {
-    texture_bind_group_layout: BindGroupLayout,
+    bind_group_layout: BindGroupLayout,
     init_pipeline: CachedComputePipelineId,
     update_pipeline: CachedComputePipelineId,
 }
 
 impl FromWorld for RayMarcherPipeline {
     fn from_world(world: &mut World) -> Self {
-        let texture_bind_group_layout =
+        let bind_group_layout =
             world
                 .resource::<RenderDevice>()
                 .create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -259,18 +259,14 @@ impl FromWorld for RayMarcherPipeline {
                     ],
                 });
 
-        let _ = world
-            .resource::<AssetServer>()
-            .load::<Shader>("shaders/utils.wgsl");
-
         let shader = world
             .resource::<AssetServer>()
-            .load("shaders/renderer.wgsl");
+            .load("shaders/compiled/render.wgsl");
 
         let pipeline_cache = world.resource::<PipelineCache>();
         let init_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
             label: None,
-            layout: vec![texture_bind_group_layout.clone()],
+            layout: vec![bind_group_layout.clone()],
             push_constant_ranges: Vec::new(),
             shader: shader.clone(),
             shader_defs: vec![],
@@ -278,7 +274,7 @@ impl FromWorld for RayMarcherPipeline {
         });
         let update_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
             label: None,
-            layout: vec![texture_bind_group_layout.clone()],
+            layout: vec![bind_group_layout.clone()],
             push_constant_ranges: Vec::new(),
             shader,
             shader_defs: vec![],
@@ -286,7 +282,7 @@ impl FromWorld for RayMarcherPipeline {
         });
 
         RayMarcherPipeline {
-            texture_bind_group_layout,
+            bind_group_layout,
             init_pipeline,
             update_pipeline,
         }
@@ -346,7 +342,7 @@ impl render_graph::Node for RayMarcherNode {
             .command_encoder()
             .begin_compute_pass(&ComputePassDescriptor::default());
 
-        let bind_group = &world.resource::<RayMarcherBindGroup>().0;
+        let bind_group = &world.resource::<RenderBindGroup>().0;
         let pipeline_cache = world.resource::<PipelineCache>();
         let pipeline = world.resource::<RayMarcherPipeline>();
 
@@ -390,6 +386,8 @@ pub struct RayMarcherRenderPlugin {}
 
 impl Plugin for RayMarcherRenderPlugin {
     fn build(&self, app: &mut App) {
+        // Main App Build
+
         app.insert_resource(RenderCamera::default());
         app.insert_resource(RenderScene {
             sun_direction: Vec3::new(0.5, 1.0, 3.0).normalize(),
@@ -401,17 +399,18 @@ impl Plugin for RayMarcherRenderPlugin {
         });
 
         app.add_plugins((
-            ExtractResourcePlugin::<RayMarcherTargetImage>::default(),
+            ExtractResourcePlugin::<RenderTargetImage>::default(),
             ExtractResourcePlugin::<RenderCamera>::default(),
             ExtractResourcePlugin::<RenderScene>::default(),
             ExtractResourcePlugin::<RenderGlobals>::default(),
         ));
 
         app.add_systems(Startup, setup);
-        app.add_systems(Update, scale_target_to_screen);
         app.add_systems(PostUpdate, (
-            synchronize_camera, synchronize_globals,
+            synchronize_camera, synchronize_globals, synchronize_target_sprite,
         ));
+
+        // Render App Build
 
         let render_app = app.sub_app_mut(RenderApp);
 

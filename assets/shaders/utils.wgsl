@@ -20,7 +20,7 @@ fn hash(value: u32) -> u32 {
     return state;
 }
 
-fn randomFloat(value: u32) -> f32 {
+fn random_float(value: u32) -> f32 {
     return f32(hash(value)) / 4294967295.0;
 }
 
