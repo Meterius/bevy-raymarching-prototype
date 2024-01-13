@@ -1,4 +1,4 @@
-use crate::renderer::types::{RenderCamera, RenderGlobals, RenderScene, RenderSDBox, RenderSDReference, RenderSDTransform, RenderSDReferenceType, RenderSDObject, RenderSDUnion, RenderSDSphere};
+use crate::renderer::types::{RenderCamera, RenderGlobals, RenderScene, RenderSDBox, RenderSDReference, RenderSDTransform, RenderSDReferenceType, RenderSDUnion, RenderSDSphere};
 use bevy::core_pipeline::clear_color::ClearColorConfig;
 use bevy::render::renderer::RenderQueue;
 use bevy::window::PrimaryWindow;
@@ -32,10 +32,11 @@ pub struct RenderCommonBuffers {
 
 #[derive(Resource)]
 pub struct RenderSdBuffers {
-    object_buffer: StorageBuffer<Vec<RenderSDObject>>,
-    sphere_buffer: StorageBuffer<Vec<RenderSDSphere>>,
-    box_buffer: StorageBuffer<Vec<RenderSDBox>>,
-    union_buffer: StorageBuffer<Vec<RenderSDUnion>>,
+    root_buffer: StorageBuffer<[RenderSDReference; 20]>,
+    sphere_buffer: StorageBuffer<[RenderSDSphere; 20]>,
+    box_buffer: StorageBuffer<[RenderSDBox; 20]>,
+    transform_buffer: StorageBuffer<[RenderSDTransform; 20]>,
+    union_buffer: StorageBuffer<[RenderSDUnion; 20]>,
 }
 
 #[derive(Clone, Debug, Default, Component)]
@@ -187,44 +188,72 @@ fn setup_buffers(
         );
     }
 
-    let sd_objects = vec![RenderSDObject {
-        transform: RenderSDTransform::default(),
-        content: RenderSDReference { variant: 1, index: 0 },
-    }];
+    let mut sd_spheres = [RenderSDSphere::default(); 20];
+    
+    sd_spheres[0] = RenderSDSphere {
+        radius: 0.75,
+    };
+    
+    sd_spheres[1] = RenderSDSphere {
+        radius: 0.5,
+    };
 
-    let sd_spheres = vec![RenderSDSphere {
-        radius: 1.0,
-    }];
-
-    let sd_boxes = vec![RenderSDBox {
+    let mut sd_boxes = [RenderSDBox::default(); 20];
+        
+    sd_boxes[0] = RenderSDBox {
         size: Vec3::ONE,
-    }];
+    };
+    
+    let mut sd_transforms = [RenderSDTransform::default(); 20];
+    
+    sd_transforms[0] = RenderSDTransform {
+        translation: Vec3::new(3.0, 2.0, 0.0),
+        scale: Vec3::new(2.0, 1.0, 1.0),
+        content: RenderSDReference { variant: RenderSDReferenceType::Sphere.as_i32(), index: 1 },
+    };
 
-    let sd_unions = vec![RenderSDUnion {
-        first: RenderSDObject {
-            transform: RenderSDTransform::default(),
-            content: RenderSDReference { variant: 1, index: 0 },
+    sd_transforms[1] = RenderSDTransform {
+        translation: Vec3::new(-3.0, 1.0, -1.0),
+        scale: Vec3::new(0.5, 0.25, 1.5),
+        content: RenderSDReference { variant: RenderSDReferenceType::Box.as_i32(), index: 0 },
+    };
+
+    let mut sd_unions = [RenderSDUnion::default(); 20];
+        
+    sd_unions[0] = RenderSDUnion {
+        first: RenderSDReference {
+            variant: RenderSDReferenceType::Transform.as_i32(),
+            index: 0,
         },
-        second: RenderSDObject {
-            transform: RenderSDTransform::default(),
-            content: RenderSDReference { variant: 1, index: 0 },
+        second: RenderSDReference {
+            variant: RenderSDReferenceType::Transform.as_i32(),
+            index: 1,
         },
-    }];
+    };
+
+    let mut sd_roots = [RenderSDReference::default(); 20];
+    
+    sd_roots[0] = RenderSDReference {
+        variant: RenderSDReferenceType::Union.as_i32(),
+        index: 0,
+    };
 
     if let Some(mut sd_buffers) = sd_buffers {
-        update_buffers!(
+        /*update_buffers!(
             render_device, render_queue, sd_buffers;
-            object_buffer, sd_objects;
+            root_buffer, sd_roots;
             sphere_buffer, sd_spheres;
             box_buffer, sd_boxes;
+            transform_buffer, sd_transforms;
             union_buffer, sd_unions;
-        );
+        );*/
     } else {
         init_buffers!(
             render_device, render_queue, RenderSdBuffers, commands;
-            object_buffer, sd_objects, StorageBuffer;
+            root_buffer, sd_roots, StorageBuffer;
             sphere_buffer, sd_spheres, StorageBuffer;
             box_buffer, sd_boxes, StorageBuffer;
+            transform_buffer, sd_transforms, StorageBuffer;
             union_buffer, sd_unions, StorageBuffer;
         );
     }
@@ -270,7 +299,7 @@ fn prepare_bind_group(
         &[
             BindGroupEntry {
                 binding: 0,
-                resource: render_sd_buffers.object_buffer.binding().unwrap(),
+                resource: render_sd_buffers.root_buffer.binding().unwrap(),
             },
             BindGroupEntry {
                 binding: 1,
@@ -282,6 +311,10 @@ fn prepare_bind_group(
             },
             BindGroupEntry {
                 binding: 3,
+                resource: render_sd_buffers.transform_buffer.binding().unwrap(),
+            },
+            BindGroupEntry {
+                binding: 4,
                 resource: render_sd_buffers.union_buffer.binding().unwrap(),
             },
         ],
@@ -365,6 +398,7 @@ impl FromWorld for RayMarcherPipeline {
                             group_layout_entry_storage!(1),
                             group_layout_entry_storage!(2),
                             group_layout_entry_storage!(3),
+                            group_layout_entry_storage!(4),
                         ],
                     });
 

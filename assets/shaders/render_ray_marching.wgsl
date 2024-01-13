@@ -2,9 +2,9 @@
 
 // Ray Marching
 
-const RAY_MARCHING_MAX_STEP_DEPTH = 4000;
+const RAY_MARCHING_MAX_STEP_DEPTH = 200;
 const RAY_MARCHER_COLLISION_DISTANCE = 0.0001;
-const RAY_MARCHER_MAX_DEPTH = 1000000.0;
+const RAY_MARCHER_MAX_DEPTH = 10000.0;
 
 const CUTOFF_REASON_NONE = 0u;
 const CUTOFF_REASON_DISTANCE = 1u;
@@ -98,7 +98,7 @@ fn ray_march_with(ray: Ray, options: RayMarchOptions) -> RayMarchHit {
             );
         }
 
-        if (sd <= RAY_MARCHER_COLLISION_DISTANCE + max(0.0, depth - 100.0) * (0.01 / 100.0)) {
+        if (sd <= RAY_MARCHER_COLLISION_DISTANCE + max(0.0, depth - 50.0) * (0.01 / 100.0)) {
             step_depth += 1;
             break;
         }

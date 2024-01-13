@@ -27,61 +27,57 @@ pub struct RenderCamera {
 
 /* Signed-Distance Types */
 
-// Properties
-
-#[derive(Clone, Debug, ShaderType)]
-pub struct RenderSDTransform {
-    pub translation: Vec3,
-    pub scale: Vec3,
-}
-
-impl Default for RenderSDTransform {
-    fn default() -> Self {
-        Self {
-            translation: Vec3::ZERO,
-            scale: Vec3::ONE,
-        }
-    }
-}
-
 // Elements Primitives
 
-#[derive(Clone, Debug, Default, ShaderType)]
+#[derive(Clone, Copy, Debug, Default, ShaderType)]
 pub struct RenderSDSphere {
     pub radius: f32,
 }
 
 
-#[derive(Clone, Debug, Default, ShaderType)]
+#[derive(Clone, Copy, Debug, Default, ShaderType)]
 pub struct RenderSDBox {
     pub size: Vec3,
 }
 
 // Element Compounds
 
-#[derive(Clone, Debug, Default, ShaderType)]
+#[derive(Clone, Copy, Debug, Default, ShaderType)]
+pub struct RenderSDTransform {
+    pub translation: Vec3,
+    pub scale: Vec3,
+
+    pub content: RenderSDReference,
+}
+
+#[derive(Clone, Copy, Debug, Default, ShaderType)]
 pub struct RenderSDUnion {
-    pub first: RenderSDObject,
-    pub second: RenderSDObject,
+    pub first: RenderSDReference,
+    pub second: RenderSDReference,
 }
 
 // Element Object
 
 pub enum RenderSDReferenceType {
-    Object = 0,
-    Sphere = 1,
-    Box = 2,
-    Union = 3,
+    Sphere,
+    Box,
+    Transform,
+    Union,
 }
 
-#[derive(Clone, Debug, Default, ShaderType)]
+impl RenderSDReferenceType {
+    pub fn as_i32(&self) -> i32 {
+        match self {
+            RenderSDReferenceType::Sphere => 1,
+            RenderSDReferenceType::Box => 2,
+            RenderSDReferenceType::Transform => 3,
+            RenderSDReferenceType::Union => 4,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, ShaderType)]
 pub struct RenderSDReference {
     pub variant: i32,
     pub index: i32,
-}
-
-#[derive(Clone, Debug, Default, ShaderType)]
-pub struct RenderSDObject {
-    pub transform: RenderSDTransform,
-    pub content: RenderSDReference,
 }

@@ -1,16 +1,102 @@
-#import "shaders/compiled/utils.wgsl"::{min3, min4, min5, wrap, wrap_cell, MAX_POSITIVE_F32}
+#import "shaders/compiled/utils.wgsl"::{min3, min4, min5, wrap, wrap_cell, min_comp3, MAX_POSITIVE_F32}
 #import "shaders/compiled/phong_reflection_model.wgsl"::{PhongReflectionMaterial}
 #import "shaders/compiled/signed_distance.wgsl"::{sdSphere, sdUnion, sdPostSmoothUnion, sdRecursiveTetrahedron, sdBox, sdPreCheapBend, sdPreMirrorB}
 
 // Runtime Scene
 
+const SD_RUNTIME_HIERARCHY_MAX_DEPTH = 16;
+
+struct SdRuntimePathNode {
+    content: RenderSDReference,
+    point: vec3<f32>,
+    child_index: i32,
+    current_sd: f32,
+}
+
+fn sd_runtime_object(root_point: vec3<f32>, root: RenderSDReference) -> f32 {
+    var path = array<SdRuntimePathNode, SD_RUNTIME_HIERARCHY_MAX_DEPTH>();
+    var path_index = 0;
+
+    path[0].content = root;
+    path[0].point = root_point;
+    path[0].child_index = 0;
+    path[0].current_sd = 0.0;
+
+    var child_sd = MAX_POSITIVE_F32;
+
+    while (path_index >= 0) {
+        if path_index >= SD_RUNTIME_HIERARCHY_MAX_DEPTH {
+            return 0.0;
+        }
+
+        let node = path[path_index];
+
+        switch node.content.variant {
+            case 1 {
+                child_sd = sdSphere(node.point, vec3<f32>(0.0), SD_SPHERES[node.content.index].radius);
+                path_index -= 1;
+            }
+            case 2 {
+                child_sd = sdBox(node.point, vec3<f32>(0.0), SD_BOXES[node.content.index].size);
+                path_index -= 1;
+            }
+            case 3 {
+                if node.child_index == 0 {
+                    path[path_index].child_index += 1;
+                    path[path_index + 1] = SdRuntimePathNode(
+                        SD_TRANSFORMS[node.content.index].content,
+                        (node.point - SD_TRANSFORMS[node.content.index].translation) / SD_TRANSFORMS[node.content.index].scale,
+                        0,
+                        0.0,
+                    );
+
+                    path_index += 1;
+                } else {
+                    child_sd = child_sd * min_comp3(abs(SD_TRANSFORMS[node.content.index].scale));
+                    path_index -= 1;
+                }
+            }
+            case 4 {
+                if node.child_index < 2 {
+                    var child_ref: RenderSDReference;
+
+                    if node.child_index == 0 {
+                        child_ref = SD_UNIONS[node.content.index].first;
+                    } else {
+                        path[path_index].current_sd = child_sd;
+                        child_ref = SD_UNIONS[node.content.index].second;
+                    }
+
+                    path[path_index].child_index += 1;
+                    path[path_index + 1] = SdRuntimePathNode(
+                        child_ref,
+                        node.point,
+                        0,
+                        0.0,
+                    );
+
+                    path_index += 1;
+                } else {
+                    child_sd = min(node.current_sd, child_sd);
+                    path_index -= 1;
+                }
+            }
+            default: {
+                return 0.0;
+            }
+        }
+    }
+
+    return child_sd;
+}
+
 fn sd_runtime_scene(p: vec3<f32>) -> f32 {
     var sd = MAX_POSITIVE_F32;
 
-    let sphere_count = i32(arrayLength(&SD_SPHERES));
-    for (var i = 0; i < sphere_count; i += 1) {
+    let ref_count = i32(1);
+    for (var i = 0; i < ref_count; i += 1) {
         sd = min(
-            sd, sdSphere(p, vec3<f32>(0.0), SD_SPHERES[i].radius),
+            sd, sd_runtime_object(p, SD_ROOTS[i]),
         );
     }
 
@@ -94,7 +180,7 @@ fn sd_scene(p: vec3<f32>) -> SdSceneData {
 
     // Axes
 
-    let sd_axes = sd_scene_axes(q);
+    let sd_axes = MAX_POSITIVE_F32; // sd_scene_axes(q);
 
     // Plane
 
@@ -102,7 +188,7 @@ fn sd_scene(p: vec3<f32>) -> SdSceneData {
 
     let sd_runtime_scene = sd_runtime_scene(q);
 
-    return SdSceneData(min(min(sd_axes, sd_runtime_scene), sd_plane), 0.0);
+    return SdSceneData(min(sd_axes, min(sd_runtime_scene, sd_plane)), 0.0);
 
     // return SdSceneData(min(
     //     sdPostSmoothUnion(
