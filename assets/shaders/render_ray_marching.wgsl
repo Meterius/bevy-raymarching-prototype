@@ -2,8 +2,8 @@
 
 // Ray Marching
 
-var<private> is_main_ray: bool = true;
-var<workgroup> workgroup_main_ray_step_depth: i32;
+var<private> is_main_ray: bool = false;
+var<workgroup> workgroup_main_ray_step_depth: atomic<i32>;
 var<workgroup> workgroup_main_ray_step_pos: array<vec3<f32>, RAY_MARCHING_MAX_STEP_DEPTH>;
 var<workgroup> workgroup_main_ray_step_sd: array<f32, RAY_MARCHING_MAX_STEP_DEPTH>;
 
@@ -98,46 +98,44 @@ fn ray_march_with(ray: Ray, options: RayMarchOptions) -> RayMarchHit {
                 sd_scene_data = sd_scene(position);
                 workgroup_main_ray_step_pos[step_depth] = position;
                 workgroup_main_ray_step_sd[step_depth] = sd_scene_data.sd;
-                workgroup_main_ray_step_depth += 1;
+                atomicStore(&workgroup_main_ray_step_depth, step_depth);
             } else {
-                if (true) {
-                    loop {
-                        loop {
-                            if (ref_step_depth + 1 < workgroup_main_ray_step_depth) {
-                                let dist = distance(workgroup_main_ray_step_pos[ref_step_depth], position);
-                                let next_dist = distance(position, workgroup_main_ray_step_pos[ref_step_depth + 1]);
+                if (ref_step_depth != atomicLoad(&workgroup_main_ray_step_depth)) {
+                    // loop {
+                    //     if (ref_step_depth + 1 < workgroup_main_ray_step_depth) {
+                    //         let dist = distance(workgroup_main_ray_step_pos[ref_step_depth], position);
+                    //         let next_dist = distance(position, workgroup_main_ray_step_pos[ref_step_depth + 1]);
 
-                                if (next_dist < dist) {
-                                    ref_step_depth += 1;
-                                } else {
-                                    break;
-                                }
-                            } else {
-                                break;
-                            }
-                        }
+                    //         if (next_dist < dist) {
+                    //             ref_step_depth += 1;
+                    //         } else {
+                    //             break;
+                    //         }
+                    //     } else {
+                    //         break;
+                    //     }
+                    // }
 
-                        let dist_pos = distance(workgroup_main_ray_step_pos[ref_step_depth], position);
-                        let dist_sd = workgroup_main_ray_step_sd[ref_step_depth];
-                        let diff = dist_sd - dist_pos;
+                    let dist_pos = distance(workgroup_main_ray_step_pos[ref_step_depth], position);
+                    let dist_sd = workgroup_main_ray_step_sd[ref_step_depth];
+                    let diff = dist_sd - dist_pos;
 
-                        if (dist_sd > 0.01 && diff > 0.01) {
-                            // let sp_center = workgroup_main_ray_step_pos[step_depth_ref];
-                            // let sp_diff = position - sp_center;
-                            // let uoc = dot(ray.direction, sp_diff);
-                            // let delta = pow(uoc, 2.0) - (dot(sp_diff, sp_diff) - pow(workgroup_main_ray_step_sd[step_depth_ref], 2.0));
-                            // delta > 0.0 && -uoc - sqrt(delta) < 0.0 && -uoc + sqrt(delta) > 0.0
-                            // sd_scene_data = SdSceneData(sqrt(delta), 0.0);
-                            // sd_scene_data = sd_scene(position);
-                            depth += diff - 0.005;
-                            skipped_depth += diff - 0.005;
-                            position = ray.origin + depth * ray.direction;
-                            step_depth += 1;
-                            max_step_depth += 1;
-                        } else {
-                            sd_scene_data = sd_scene(position);
-                            break;
-                        }
+                    if (dist_sd > 0.01 && diff > 0.01) {
+                        // let sp_center = workgroup_main_ray_step_pos[step_depth_ref];
+                        // let sp_diff = position - sp_center;
+                        // let uoc = dot(ray.direction, sp_diff);
+                        // let delta = pow(uoc, 2.0) - (dot(sp_diff, sp_diff) - pow(workgroup_main_ray_step_sd[step_depth_ref], 2.0));
+                        // delta > 0.0 && -uoc - sqrt(delta) < 0.0 && -uoc + sqrt(delta) > 0.0
+                        // sd_scene_data = SdSceneData(sqrt(delta), 0.0);
+                        // sd_scene_data = sd_scene(position);
+                        depth += diff - 0.005;
+                        skipped_depth += diff - 0.005;
+                        position = ray.origin + depth * ray.direction;
+                        step_depth += 1;
+                        max_step_depth += 1;
+                        ref_step_depth += 1;
+                    } else {
+                        sd_scene_data = sd_scene(position);
                     }
                 } else {
                     sd_scene_data = sd_scene(position);
@@ -192,7 +190,7 @@ fn ray_march_with(ray: Ray, options: RayMarchOptions) -> RayMarchHit {
 
     
     if (is_main_ray) {
-        // pixel_color_override = vec3<f32>(0.0, 0.0, skipped_depth / depth);
+        // pixel_color_override = vec3<f32>(0.0, 0.0, depth * 0.001);
     }
 
     is_main_ray = false;

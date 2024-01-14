@@ -162,10 +162,10 @@ fn update(
         color = render_pixel(texture_coord);
     }
 
+    workgroupBarrier();
+
     if (!is_main_invocation) {
         color = render_pixel(texture_coord);
-    } else {
-        color = vec3<f32>(1.0, 0.0, 0.0);
     }
 
     // let color = vec3<f32>(viewport_coord * vec2<f32>(0.5) + vec2<f32>(0.5), 0.0);
