@@ -9,19 +9,20 @@ const SQRT_2_INVERSE = 0.7071067811865475;
 const SQRT_3 = 1.732050807568877293527446341505872367;
 const SQRT_3_INVERSE = 0.5773502691896258;
 
-fn hash(value: u32) -> u32 {
-    var state = value;
-    state = state ^ 2747636419u;
-    state = state * 2654435769u;
-    state = state ^ state >> 16u;
-    state = state * 2654435769u;
-    state = state ^ state >> 16u;
-    state = state * 2654435769u;
-    return state;
+var<private> random_state: u32;
+
+fn rand() -> f32 {
+    random_state = random_state ^ 2747636419u;
+    random_state = random_state * 2654435769u;
+    random_state = random_state ^ (random_state >> 16u);
+    random_state = random_state * 2654435769u;
+    random_state = random_state ^ (random_state >> 16u);
+    random_state = random_state * 2654435769u;
+    return f32(random_state) / 4294967296.0;
 }
 
-fn random_float(value: u32) -> f32 {
-    return f32(hash(value)) / 4294967295.0;
+fn rand_unit_vec() -> vec3<f32> {
+    return normalize(vec3<f32>(rand(), rand(), rand()));
 }
 
 fn max3(v1: f32, v2: f32, v3: f32) -> f32 {
@@ -87,4 +88,8 @@ fn wrap_reflect(x: f32, lower: f32, upper: f32) -> f32 {
     } else {
         return lower + offset;
     }
+}
+
+fn log_b(x: f32, b: f32) -> f32 {
+    return log2(x) / log2(b);
 }

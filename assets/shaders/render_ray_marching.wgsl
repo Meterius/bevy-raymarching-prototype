@@ -1,14 +1,10 @@
-// #import "shaders/compiled/render_scene_sd.wgsl"::{sd_scene, sd_scene_normal, SdSceneData} 
+// #import "shaders/compiled/render_scene_sd.wgsl"::{sd_scene, sd_scene_normal, SdSceneData}
+#import "shaders/compiled/utils.wgsl"::{log_b, min_comp3} 
 
 // Ray Marching
 
-var<private> is_main_ray: bool = false;
-var<workgroup> workgroup_main_ray_step_depth: atomic<i32>;
-var<workgroup> workgroup_main_ray_step_pos: array<vec3<f32>, RAY_MARCHING_MAX_STEP_DEPTH>;
-var<workgroup> workgroup_main_ray_step_sd: array<f32, RAY_MARCHING_MAX_STEP_DEPTH>;
-
-const RAY_MARCHING_MAX_STEP_DEPTH = 200;
-const RAY_MARCHER_COLLISION_DISTANCE = 0.0001;
+const RAY_MARCHING_MAX_STEP_DEPTH = 500;
+const RAY_MARCHER_COLLISION_DISTANCE = 0.001;
 const RAY_MARCHER_MAX_DEPTH = 10000.0;
 
 const CUTOFF_REASON_NONE = 0u;
@@ -20,33 +16,13 @@ struct Ray {
     direction: vec3<f32>,
 }
 
-struct RayMarchHit {
-    pos: vec3<f32>,
-    depth: f32,
-    step_depth: i32,
-    shortest_distance: f32,
-    soft_shadow_factor: f32,
-    cutoff_reason: u32,
-    average_sd_scene_data: SdSceneData,
-    minimal_sd_scene_data: SdSceneData,
-    maximal_sd_scene_data: SdSceneData,
-}
-
-fn is_colliding_distance(sd: f32) -> bool {
-    return sd <= RAY_MARCHER_COLLISION_DISTANCE;
-}
-
-const APPROX_AO_SAMPLE_COUNT = 5;
+const APPROX_AO_SAMPLE_COUNT = 10;
 const APPROX_AO_SAMPLE_STEP = 0.1;
 
-fn ray_march_hit_approx_soft_shadow(ray: Ray, hit: RayMarchHit, sun_dir: vec3<f32>) -> f32 {
-    if (true) {
-        return 0.0;
-    }
-
-    let light_hit = ray_march_with(Ray(hit.pos, sun_dir), RayMarchOptions(RAY_MARCHER_MAX_DEPTH, true));
+fn ray_march_hit_approx_soft_shadow(ray: Ray, hit: RayMarchHit, sun_direction: vec3<f32>) -> f32 {
+    let light_hit = ray_march(Ray(hit.position + sun_direction * 0.01, sun_direction), RayMarchOptions(RAY_MARCHER_MAX_DEPTH, RAY_MARCHING_MAX_STEP_DEPTH));
     return f32(light_hit.cutoff_reason != CUTOFF_REASON_NONE) * clamp(
-        pow(light_hit.soft_shadow_factor, 0.8), 0.0, 1.0,
+        pow(light_hit.weighted_shortest_distance, 0.8), 0.0, 1.0,
     );
 }
 
@@ -55,13 +31,24 @@ fn ray_march_hit_approx_ao(ray: Ray, hit: RayMarchHit) -> f32 {
         return 0.0;
     }
 
-    let normal = sd_scene_normal(hit.pos);
+    let normal = sd_scene_normal(hit.position);
 
     var total = 0.0;
+    var collision = false;
 
     for (var i = 1; i < APPROX_AO_SAMPLE_COUNT; i += 1) {
         let delta = f32(i) * APPROX_AO_SAMPLE_STEP;
-        let sd = sd_scene(hit.pos + normal * delta).sd;
+        var sd: f32 = 0.0;
+
+        if (!collision) {
+            sd = sd_scene(hit.position + normal * delta);
+
+            if (sd <= RAY_MARCHER_COLLISION_DISTANCE) {
+                collision = true;
+                sd = 0.0;
+            }
+        }
+
         total += pow(2.0, f32(-i)) * (delta - sd);
     }
 
@@ -70,138 +57,95 @@ fn ray_march_hit_approx_ao(ray: Ray, hit: RayMarchHit) -> f32 {
 
 struct RayMarchOptions {
     depth_limit: f32,
-    use_hit_escape: bool,
+    step_depth_limit: i32,
 }
 
-fn ray_march_with(ray: Ray, options: RayMarchOptions) -> RayMarchHit {
-    var depth = f32(options.use_hit_escape) * 0.01;
-    var position = ray.origin + depth * ray.direction;
-    var shortest_distance = 3.40282346638528859812e+38f;
-    var soft_shadow_factor = 3.40282346638528859812e+38f;
+struct RayMarchHit {
+    position: vec3<f32>,
+    depth: f32,
+    weighted_shortest_distance: f32,
+    step_depth: i32,
+    cutoff_reason: u32,
+}
 
-    var step_depth = 0;
-    var cutoff_reason = 0u;
+fn steps_until_depth_limit(initial_sd: f32, depth: f32, depth_limit: f32, direction: f32) -> f32 {
+    return log_b(
+        1.0 + (depth_limit - depth) * direction / ((direction + 1.0) * initial_sd), (direction + 1.0)
+    );
+}
 
-    var sd_scene_data_total = SdSceneData(0.0, 0.0);
-    var sd_scene_data_minimal = SdSceneData(3.40282346638528859812e+38f, 3.40282346638528859812e+38f);
-    var sd_scene_data_maximal = SdSceneData(-3.40282346638528859812e+38f, -3.40282346638528859812e+38f);
+var<private> rs_compute_node_offset: i32 = 0;
+var<workgroup> rs_compute_nodes: array<RsComputeNode, 2048> = array<RsComputeNode, 2048>();
 
-    var ref_step_depth = 0;
-    var max_step_depth = RAY_MARCHING_MAX_STEP_DEPTH;
-    var skipped_depth = 0.0;
+fn ray_march(ray: Ray, options: RayMarchOptions) -> RayMarchHit {
+    var hit = RayMarchHit();
+    hit.weighted_shortest_distance = 3.40282346638528859812e+38f;
+    hit.position = ray.origin;
 
-    for (; step_depth < max_step_depth; step_depth += 1) {
-        var sd_scene_data: SdSceneData;
+    for (; hit.step_depth < options.step_depth_limit; hit.step_depth += 1) {
+        var sd = sd_scene(hit.position);
 
-        if (is_main_ray) {
-            if (is_main_invocation) {
-                sd_scene_data = sd_scene(position);
-                workgroup_main_ray_step_pos[step_depth] = position;
-                workgroup_main_ray_step_sd[step_depth] = sd_scene_data.sd;
-                atomicStore(&workgroup_main_ray_step_depth, step_depth);
-            } else {
-                if (ref_step_depth != atomicLoad(&workgroup_main_ray_step_depth)) {
-                    // loop {
-                    //     if (ref_step_depth + 1 < workgroup_main_ray_step_depth) {
-                    //         let dist = distance(workgroup_main_ray_step_pos[ref_step_depth], position);
-                    //         let next_dist = distance(position, workgroup_main_ray_step_pos[ref_step_depth + 1]);
+        //
 
-                    //         if (next_dist < dist) {
-                    //             ref_step_depth += 1;
-                    //         } else {
-                    //             break;
-                    //         }
-                    //     } else {
-                    //         break;
-                    //     }
-                    // }
-
-                    let dist_pos = distance(workgroup_main_ray_step_pos[ref_step_depth], position);
-                    let dist_sd = workgroup_main_ray_step_sd[ref_step_depth];
-                    let diff = dist_sd - dist_pos;
-
-                    if (dist_sd > 0.01 && diff > 0.01) {
-                        // let sp_center = workgroup_main_ray_step_pos[step_depth_ref];
-                        // let sp_diff = position - sp_center;
-                        // let uoc = dot(ray.direction, sp_diff);
-                        // let delta = pow(uoc, 2.0) - (dot(sp_diff, sp_diff) - pow(workgroup_main_ray_step_sd[step_depth_ref], 2.0));
-                        // delta > 0.0 && -uoc - sqrt(delta) < 0.0 && -uoc + sqrt(delta) > 0.0
-                        // sd_scene_data = SdSceneData(sqrt(delta), 0.0);
-                        // sd_scene_data = sd_scene(position);
-                        depth += diff - 0.005;
-                        skipped_depth += diff - 0.005;
-                        position = ray.origin + depth * ray.direction;
-                        step_depth += 1;
-                        max_step_depth += 1;
-                        ref_step_depth += 1;
-                    } else {
-                        sd_scene_data = sd_scene(position);
-                    }
-                } else {
-                    sd_scene_data = sd_scene(position);
-                }
+        if (false && length(hit.position) <= 20.0) {
+            for (var i = 0; i < SD_SCENE.pre_count; i += 1) {
+                rs_compute_nodes[rs_compute_node_offset + i].position = (hit.position - SD_SCENE.pre[i].translation) * SD_SCENE.pre[i].scale;
             }
-        } else {
-            sd_scene_data = sd_scene(position);
+
+            for (var i = 0; i < SD_SCENE.primitive_count; i += 1) {
+                let dist = length(rs_compute_nodes[rs_compute_node_offset + i].position);
+
+                rs_compute_nodes[rs_compute_node_offset + i].sd = select(
+                    min_comp3(abs(rs_compute_nodes[rs_compute_node_offset + i].position)) - 0.5,
+                    length(rs_compute_nodes[rs_compute_node_offset + i].position) - 0.5,
+                    SD_SCENE.primitive[i].is_sphere != 0,
+                );
+            }
+
+            for (var i = 0; i < SD_SCENE.pre_count; i += 1) {
+                sd = min(sd, rs_compute_nodes[rs_compute_node_offset + i].sd * SD_SCENE.pre[i].min_scale);
+            }
         }
 
-        sd_scene_data_total.sd += sd_scene_data.sd;
-        sd_scene_data_total.iterations += sd_scene_data.iterations;
-        sd_scene_data_minimal.sd = min(sd_scene_data_minimal.sd, sd_scene_data.sd);
-        sd_scene_data_minimal.iterations = min(sd_scene_data_minimal.iterations, sd_scene_data.iterations);
-        sd_scene_data_maximal.sd = max(sd_scene_data_maximal.sd, sd_scene_data.sd);
-        sd_scene_data_maximal.iterations = max(sd_scene_data_maximal.iterations, sd_scene_data.iterations);
+        //
 
-        let sd = sd_scene_data.sd;
+        let cutoff_plane = 100.0;
+        if (false && hit.position.y > cutoff_plane) {
+            if (ray.direction.y < 0.0) {
+                sd = (-(hit.position.y - cutoff_plane) / ray.direction.y) + 0.1;
+            } else {
+                hit.step_depth = min(i32(f32(hit.step_depth) + steps_until_depth_limit(sd, hit.depth, options.depth_limit, ray.direction.y)), options.step_depth_limit);
+                hit.position += (options.depth_limit - hit.depth) * ray.direction;
+                hit.cutoff_reason = CUTOFF_REASON_DISTANCE;
+                hit.depth = options.depth_limit;
+                break;
+            }
+        }
 
-        shortest_distance = min(sd, shortest_distance);
+        if (sd <= RAY_MARCHER_COLLISION_DISTANCE + max(0.0, hit.depth - 100.0) * (0.01 / 100.0)) {
+            hit.cutoff_reason = CUTOFF_REASON_NONE;
+            break;
+        }
 
-        if (depth >= 0.1) {
-            soft_shadow_factor = min(
-                soft_shadow_factor,
-                sd / depth,
+        if (hit.depth >= 0.1) {
+            hit.weighted_shortest_distance = min(
+                hit.weighted_shortest_distance,
+                sd / hit.depth,
             );
         }
 
-        if (sd <= RAY_MARCHER_COLLISION_DISTANCE + max(0.0, depth - 50.0) * (0.01 / 100.0)) {
-            step_depth += 1;
-            break;
-        }
+        hit.depth += sd;
+        hit.position += sd * ray.direction;
 
-        depth += sd;
-        let ray_offset = vec3<f32>(0.0); // vec3<f32>(0.0, sin(depth) * 0.35, 0.0);
-        position = ray.origin + depth * ray.direction + ray_offset;
-
-        if (depth >= options.depth_limit) {
-            cutoff_reason = CUTOFF_REASON_DISTANCE;
-            step_depth += 1;
+        if (hit.depth >= options.depth_limit) {
+            hit.cutoff_reason = CUTOFF_REASON_DISTANCE;
             break;
         }
     }
 
-    if (step_depth == max_step_depth) {
-        cutoff_reason = CUTOFF_REASON_STEPS;
+    if (hit.step_depth == options.step_depth_limit) {
+        hit.cutoff_reason = CUTOFF_REASON_STEPS;
     }
 
-    let sd_scene_data_average = SdSceneData(
-        sd_scene_data_total.sd / f32(step_depth),
-        sd_scene_data_total.iterations / f32(step_depth)
-    );
-
-    
-    if (is_main_ray) {
-        // pixel_color_override = vec3<f32>(0.0, 0.0, depth * 0.001);
-    }
-
-    is_main_ray = false;
-
-    return RayMarchHit(
-        position, depth, step_depth, shortest_distance,
-        soft_shadow_factor, cutoff_reason, sd_scene_data_average,
-        sd_scene_data_minimal, sd_scene_data_maximal
-    );
-}
-
-fn ray_march(ray: Ray) -> RayMarchHit {
-    return ray_march_with(ray, RayMarchOptions(RAY_MARCHER_MAX_DEPTH, false));
+    return hit;
 }

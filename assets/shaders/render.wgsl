@@ -2,7 +2,7 @@
 // #import "shaders/compiled/render_ray_marching.wgsl"::{Ray, RayMarchHit, ray_march_with, ray_march, ray_march_hit_approx_ao, ray_march_hit_approx_soft_shadow}
 #import "shaders/compiled/phong_reflection_model.wgsl"::{PhongReflectionLight, phong_reflect_light}
 #import "shaders/compiled/color.wgsl"::{color_map_default, hdr_map_aces_tone, color_map_temp}
-#import "shaders/compiled/utils.wgsl"::{PI}
+#import "shaders/compiled/utils.wgsl"::{PI, random_state, rand}
 
 var<private> is_main_invocation: bool;
 var<private> pixel_color_override: vec3<f32> = vec3<f32>(-1.0, -1.0, -1.0);
@@ -56,16 +56,16 @@ fn render_skybox(ray: Ray, hit: RayMarchHit) -> vec3<f32> {
 }
 
 fn render_hit(ray: Ray, hit: RayMarchHit) -> vec3<f32> {
-    // let fogColor = vec3<f32>(0.7,0.7, 1.0);
-    let fogColor = mix(vec3<f32>(0.7, 0.7, 1.0), normalize(render_skybox(ray, hit)), 0.9); // vec3<f32>(0.7, 0.7, 1.0);
+    let fogColor = render_skybox(ray, hit);
+    // let fogColor = mix(vec3<f32>(0.7, 0.7, 1.0), normalize(render_skybox(ray, hit)), 0.9);
 
     var color: vec3<f32>;
     if (hit.cutoff_reason == CUTOFF_REASON_DISTANCE) {
-        color = render_skybox(ray, hit); // mix(vec3<f32>(0.5), vec3<f32>(1.0, 0.2, 0.2), clamp(pow(f32(hit.step_depth) * 0.01, 2.0), 0.0, 1.0));
+        color = render_skybox(ray, hit);
     } else if (hit.cutoff_reason == CUTOFF_REASON_STEPS) {
-        color = fogColor; //color_map_a(hit.depth * 0.1);
+        color = fogColor;
     } else {
-        let normal = sd_scene_normal(hit.pos);
+        let normal = sd_scene_normal(hit.position);
 
         // Shading And Coloring
 
@@ -76,14 +76,16 @@ fn render_hit(ray: Ray, hit: RayMarchHit) -> vec3<f32> {
         );
 
         let base_material_color = color_map_default(
-            length(
-                hit.pos + vec3<f32>(30.0 * sin(GLOBALS.time * 0.1 + 20.75), 40.0 * sin(GLOBALS.time * 0.25 + 10.75), 50.0 * sin(GLOBALS.time * 0.5 + 100.75))
+            0.0 * length(
+                hit.position + vec3<f32>(30.0 * sin(GLOBALS.time * 0.1 + 20.75), 40.0 * sin(GLOBALS.time * 0.25 + 10.75), 50.0 * sin(GLOBALS.time * 0.5 + 100.75))
             ) * 0.001 + (f32(hit.step_depth) / f32(RAY_MARCHING_MAX_STEP_DEPTH)) * 0.1
         ) * 5.0;
 
+        let material = sd_scene_material(hit.position, base_material_color);
+
         let phong_light = phong_reflect_light(
-            CAMERA.position, hit.pos, normal,
-            sd_scene_material(hit.pos, base_material_color),
+            CAMERA.position, hit.position, normal,
+            material,
             scene_light,
         );
 
@@ -93,29 +95,20 @@ fn render_hit(ray: Ray, hit: RayMarchHit) -> vec3<f32> {
         let shading_light = shadow * phong_light;
         let light = (shading_light * 0.99 + 0.01 * ao);
 
-        color = base_material_color * 1.0 * pow(light, 0.8);
+        color = material.color * 1.0 * pow(light, 0.8);
 
         // Fog
 
         let fogFac = 1.0 - exp(-pow(hit.depth * 0.0001, 2.0));
         color = mix(color, fogColor, clamp(fogFac, 0.0, 1.0));
-
-        // color = color * vec3<f32>(shadow * 0.9 + 0.1);
-        // color = vec3<f32>(shadow);
     }
-
-    // let iter = hit.average_sd_scene_data.iterations;
-    // color = vec3<f32>((color.x + color.y + color.z) / 3.0);
-    // color = mix(color, vec3<f32>(1.0), 0.4);
-    //color *= color_map_temp(iter / 10.0);
 
     return color;
 }
 
 fn render_ray(ray: Ray) -> vec3<f32> {
-    let hit = ray_march(ray);
-    return vec3<f32>(hit.depth * 0.001);
-    // return render_hit(ray, hit);
+    let hit = ray_march(ray, RayMarchOptions(RAY_MARCHER_MAX_DEPTH, RAY_MARCHING_MAX_STEP_DEPTH));
+    return render_hit(ray, hit);
 }
 
 fn render_pixel(texture_coord: vec2<i32>) -> vec3<f32> {
@@ -152,29 +145,18 @@ fn update(
     @builtin(global_invocation_id) invocation_id: vec3<u32>,
     @builtin(local_invocation_id) local_invocation_id: vec3<u32>
 ) {
+    random_state = invocation_id.x + u32(GLOBALS.render_texture_size.x) * invocation_id.y + u32(GLOBALS.render_texture_size.x) * u32(GLOBALS.render_texture_size.y) * GLOBALS.seed;
+
     let texture_coord = invocation_id_to_texture_coord(invocation_id);
     let viewport_coord = texture_coord_to_viewport_coord(vec2<f32>(texture_coord));
 
-    is_main_invocation = local_invocation_id.x == 4u && local_invocation_id.y == 4u;
+    rs_compute_node_offset = 32 * i32(local_invocation_id.x + local_invocation_id.y * 8u);
+
+    is_main_invocation = invocation_id.x == 4u && local_invocation_id.y == 4u;
 
     var color: vec3<f32>;
-    if is_main_invocation {
-        color = render_pixel(texture_coord);
-    }
 
-    workgroupBarrier();
-
-    if (!is_main_invocation) {
-        color = render_pixel(texture_coord);
-    }
-
-    // let color = vec3<f32>(viewport_coord * vec2<f32>(0.5) + vec2<f32>(0.5), 0.0);
-
-    if (viewport_coord.y <= -0.9) {
-        color = color_map_temp(0.5 * viewport_coord.x + 0.5) * vec3<f32>(f32(viewport_coord.y <= -0.95));
-    }
-
-    color = hdr_map_aces_tone(color);
+    color = render_pixel(texture_coord);
 
     if (pixel_color_override.x != -1.0) {
         color = pixel_color_override;

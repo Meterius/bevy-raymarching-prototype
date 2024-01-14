@@ -8,12 +8,17 @@ bevy = { version = "0.12.1" }
 bevy_editor_pls = "0.7.0"
 bevy_flycam = "0.12.0"
 bytemuck = "1.14.0"
+naga = "0.14.2"
+naga_oil = "0.11.0"
+rand = "0.8.5"
 
 [build-dependencies]
 syn = "2.0.48"
 proc-macro2 = "1.0.76"
 regex = "1.10.2"
 quote = "1.0.35"
+naga = "0.14.2"
+naga_oil = "0.11.0"
 
 [profile.dev]
 opt-level = 1

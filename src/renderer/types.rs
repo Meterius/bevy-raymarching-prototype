@@ -3,6 +3,7 @@ use bevy::{prelude::*, render::{extract_resource::ExtractResource, render_resour
 #[derive(Clone, Debug, Default, Resource, Reflect, ExtractResource, ShaderType)]
 #[reflect(Resource)]
 pub struct RenderGlobals {
+    pub seed: u32,
     pub time: f32,
 
     pub render_texture_size: Vec2,
@@ -31,47 +32,31 @@ pub struct RenderCamera {
 
 #[derive(Clone, Debug, Default, ShaderType)]
 pub struct RenderSDScene {
-    pub compound_count: i32,
-    pub compounds: [RenderSDCompoundNode; 32],
+    pub pre_count: i32,
+    pub pre: [RenderSDPreNode; 32],
 
     pub primitive_count: i32,
-    pub primitives: [RenderSDPrimitiveNode; 32],
+    pub primitive: [RenderSDPrimitiveNode; 32],
 }
 
 #[derive(Clone, Copy, Debug, ShaderType)]
-pub struct RenderSDCompoundNode {
-    // pre-transforming
-    pub pre_translation: Vec3,
-    pub pre_scale: Vec3,
-
-    // post-transforming
-    pub post_scale: f32,
-
-    // relations
-    pub parent: i32,
-    pub children: [i32; 2],
+pub struct RenderSDPreNode {
+    pub translation: Vec3,
+    pub scale: Vec3,
+    pub min_scale: f32,
 }
 
-impl Default for RenderSDCompoundNode {
+impl Default for RenderSDPreNode {
     fn default() -> Self {
         Self {
-            pre_translation: Vec3::ZERO,
-            pre_scale: Vec3::ONE,
-            post_scale: 1.0,
-            parent: -1,
-            children: [-1, -1],
+            translation: Vec3::ZERO,
+            scale: Vec3::ONE,
+            min_scale: 1.0,
         }
     }
 }
 
 #[derive(Clone, Copy, Debug, Default, ShaderType)]
 pub struct RenderSDPrimitiveNode {
-    pub use_sphere: i32,
-    pub sphere: f32,
-
-    pub use_block: i32,
-    pub block: Vec3,
-
-    // output
-    pub container: i32,
+    pub is_sphere: i32,
 }

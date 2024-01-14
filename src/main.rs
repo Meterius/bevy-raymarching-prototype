@@ -1,8 +1,10 @@
 use bevy::diagnostic::{EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
+use bevy::render::settings::{WgpuSettings, Backends, RenderCreation};
 use bevy::window::{PresentMode, WindowResolution, CursorGrabMode, PrimaryWindow};
 use bevy_editor_pls::EditorPlugin;
 use bevy_flycam::NoCameraPlayerPlugin;
+use bevy::render::RenderPlugin;
 
 pub mod input_handling;
 pub mod example_scene;
@@ -16,10 +18,15 @@ fn main() {
             primary_window: Some(Window {
                 position: WindowPosition::Centered(MonitorSelection::Index(1)),
                 present_mode: PresentMode::AutoVsync,
-                resolution: WindowResolution::new(1280., 720.),
+                resolution: WindowResolution::new(1920., 1080.),
                 ..default()
             }),
             ..default()
+        }).set(RenderPlugin {
+            render_creation: RenderCreation::Automatic(WgpuSettings {
+                backends: Some(Backends::VULKAN),
+                ..default()
+            }),
         }),
         FrameTimeDiagnosticsPlugin::default(),
         EntityCountDiagnosticsPlugin::default(),

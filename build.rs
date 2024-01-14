@@ -323,4 +323,5 @@ fn compile_shader_structs() {
 fn main() {
     compile_shader_structs();
     compile_shaders();
+
 }

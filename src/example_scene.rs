@@ -34,7 +34,7 @@ pub fn setup_scene(
     // camera
     commands.spawn((
         Camera3dBundle {
-            transform: Transform::from_xyz(-2.5, 4.5, 9.0).looking_at(Vec3::ZERO, Vec3::Y),
+            transform: Transform::from_xyz(-2.5, 24.5, 9.0).looking_at(Vec3::ZERO, Vec3::Y),
             ..default()
         },
         FlyCam,

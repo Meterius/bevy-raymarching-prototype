@@ -1,69 +1,22 @@
 #import "shaders/compiled/utils.wgsl"::{min3, min4, min5, wrap, wrap_cell, min_comp3, MAX_POSITIVE_F32}
 #import "shaders/compiled/phong_reflection_model.wgsl"::{PhongReflectionMaterial}
-#import "shaders/compiled/signed_distance.wgsl"::{sdSphere, sdUnion, sdPostSmoothUnion, sdRecursiveTetrahedron, sdBox, sdPreCheapBend, sdPreMirrorB}
+#import "shaders/compiled/signed_distance.wgsl"::{sdSphere, sdUnion, sdPostSmoothUnion, sdRecursiveTetrahedron, sdBox, sdPreCheapBend, sdPreMirror, sdPreMirrorB}
+#import "shaders/compiled/fractals.wgsl"::{de}
 
 // Runtime Scene
 
-const SD_RUNTIME_SCENE_NODES = 8;
-
-var<private> rs_compute_nodes: array<RsComputeNode, SD_RUNTIME_SCENE_NODES> = array<RsComputeNode, SD_RUNTIME_SCENE_NODES>();
+const SD_RUNTIME_SCENE_NODES = 32;
 
 struct RsComputeNode {
     position: vec3<f32>,
     sd: f32,
 }
 
-fn sd_runtime_scene(p: vec3<f32>) -> f32 {
-    var sd = MAX_POSITIVE_F32;
-
-    if (true) {
-        return sd;
-    }
-
-    rs_compute_nodes[SD_SCENE.compound_count].position = p;
-
-    for (var i = 0; i < SD_SCENE.compound_count; i++) {
-        rs_compute_nodes[i].position = (
-            rs_compute_nodes[SD_SCENE.compounds[i].parent].position
-            - SD_SCENE.compounds[i].pre_translation
-        ) / SD_SCENE.compounds[i].pre_scale;
-    }
-
-    for (var i = 0; i < SD_SCENE.primitive_count; i++) {
-        if SD_SCENE.primitives[i].use_sphere == 0 {
-            rs_compute_nodes[
-                SD_SCENE.primitives[i].container
-            ].sd = sdBox(
-                rs_compute_nodes[
-                    SD_SCENE.primitives[i].container
-                ].position, vec3<f32>(0.0), SD_SCENE.primitives[i].block,
-            );
-        } else {
-            rs_compute_nodes[
-                SD_SCENE.primitives[i].container
-            ].sd = sdSphere(
-                rs_compute_nodes[
-                    SD_SCENE.primitives[i].container
-                ].position, vec3<f32>(0.0), SD_SCENE.primitives[i].sphere,
-            );
-        }
-    }
-
-    for (var i = SD_SCENE.compound_count - 1; i >= 0; i--) {
-        rs_compute_nodes[i].sd = min(
-            rs_compute_nodes[ SD_SCENE.compounds[i].children[0] ].sd,
-            rs_compute_nodes[ SD_SCENE.compounds[i].children[1] ].sd
-        ) * SD_SCENE.compounds[i].post_scale;
-    }
-
-    return rs_compute_nodes[0].sd;
-}
-
 // Scene
 
 fn sd_scene_axes(p: vec3<f32>) -> f32 {
-    return min3(
-        sdSphere(vec3<f32>(p.x, wrap(p.y, -0.5, 0.5), p.z), vec3<f32>(0.0), 0.1),
+    return min(
+        // sdSphere(vec3<f32>(p.x, wrap(p.y, -0.5, 0.5), p.z), vec3<f32>(0.0), 0.1),
         sdSphere(vec3<f32>(wrap(p.x, -0.5, 0.5), p.y, p.z), vec3<f32>(0.0), 0.1),
         sdSphere(vec3<f32>(p.x, p.y, wrap(p.z, -0.5, 0.5)), vec3<f32>(0.0), 0.1),
     );
@@ -107,13 +60,39 @@ fn sd_scene_column_pattern(p: vec3<f32>, grid_gap: vec2<f32>) -> f32 {
     ), sd_scene_column(columns_wrapped_pos, columns_cell * vec3<f32>(grid_gap, 1.0)), 4.0);
 }
 
-struct SdSceneData {
-    sd: f32,
-    iterations: f32,
+fn rotateZ(vec: vec3<f32>, angle: f32) -> vec3<f32> {
+    let cosA = cos(angle);
+    let sinA = sin(angle);
+    
+    // Rotation matrix for Z-axis
+    let rotMat = mat3x3<f32>(
+        cosA, -sinA, 0.0,
+        sinA, cosA, 0.0,
+        0.0,  0.0,  1.0
+    );
+
+    return rotMat * vec;
 }
 
-fn sd_scene(p: vec3<f32>) -> SdSceneData {
-    var q = p;
+fn sd_fractal(p: vec3<f32>) -> f32 {
+    var q = p / 25.0;
+    let pre = q.x;
+    q.x = wrap(q.x, -4.0, 4.0);
+
+    q.y += select(0.0, cos(GLOBALS.time * pre * 0.01) * 0.15, abs(pre) >= 2.0);
+    // q.y += pow(abs(p.x) * cos(p.x) * 0.001 * (1.1 * (sin(GLOBALS.time * 2.0) + 1.2 * cos(GLOBALS.time * 3.0))), 3.0);
+
+    let t = abs(pow((cos(GLOBALS.time * 2.0) + sin(GLOBALS.time * 2.0 * 3.0 + 0.1)), 3.0) / 4.0);
+
+    q = rotateZ(q, GLOBALS.time * (1.0 + sin(GLOBALS.time * 2.0 * 0.005)) * 0.05);
+
+    return sdPostSmoothUnion(
+        de(q, GLOBALS.time), length(q) - (0.1 + 0.5 * sin(GLOBALS.time * 2.0)), 0.6 * t,
+     ) * 25.0;
+}
+
+fn sd_scene(p: vec3<f32>) -> f32 {
+    var q = p; // sdPreMirror(p, normalize(vec3<f32>(0.0, -0.25, 1.0)), -200.0);
 
     // Tetrahedron
     let tetrahedron_scale = 400.0;
@@ -123,175 +102,85 @@ fn sd_scene(p: vec3<f32>) -> SdSceneData {
         wrap(q.z, -tetrahedron_scale*2.0, tetrahedron_scale*2.0),
     ), q, 1.0);
 
-    let tetrahedron_translated_pos = tetrahedron_wrapped_pos - vec3<f32>(0.0, tetrahedron_scale + 25.0, 0.0);
+    let tetrahedron_translated_pos = tetrahedron_wrapped_pos - vec3<f32>(0.0, tetrahedron_scale, 0.0);
     let tetrahedron_scaled_pos = tetrahedron_translated_pos / tetrahedron_scale;
 
-    let sd_tetrahedron_data = sdRecursiveTetrahedron(tetrahedron_scaled_pos);
+    let p2 = (q / tetrahedron_scale + vec3<f32>(-0.2, -0.3, 1.9));
+    let sd_tetrahedron_data = sdRecursiveTetrahedron(p2);
     let sd_tetrahedron = sd_tetrahedron_data.x * tetrahedron_scale;
 
     // Columns
 
-    let sd_columns = sd_scene_column_pattern(q, vec2<f32>(1.0, 1.0));
+    let sd_columns = sd_scene_column_pattern(q, vec2<f32>(1.5, 1.5));
     let sd_large_columns = sd_scene_column_pattern(q / 30.0 + vec3<f32>(00.0, 0.0, 30.0), vec2<f32>(5.0 + sin(GLOBALS.time * 0.1) * 6.0, 10.0)) * 30.0;
+
+    // Octa
+
+    let sd_octa = sd_fractal(q);
 
     // Axes
 
     let sd_axes = MAX_POSITIVE_F32; // sd_scene_axes(q);
 
-    var b = 0.0;
-    var a = sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0));
+    let sd_runtime = MAX_POSITIVE_F32; // sd_runtime_scene(q);
 
-    b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-            b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-            b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-            b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-    a = min(a, sd_scene_column(p + vec3<f32>(b), vec3<f32>(0.0)));
-        b += 1.0;
-
-    // Plane
-
-    let sd_plane = MAX_POSITIVE_F32;
-
-    let sd_runtime_scene = sd_runtime_scene(q);
-
-    let qt = abs(q - vec3<f32>(4.0, 5.0, 4.0)) - vec3<f32>(1.0, 1.0, 1.0);
-    let rounded_box = length(max(qt, vec3<f32>(0.0))) + min(max(q.x, max(q.y, q.z)), 0.0) - 0.5;
-
-    return SdSceneData(min(min(min(a, sd_axes), rounded_box), min(sd_runtime_scene, sd_plane)), 0.0);
-
-    // return SdSceneData(min(
-    //     sdPostSmoothUnion(
-    //         sd_tetrahedron,
-    //         sdPostSmoothUnion(
-    //             sdPostSmoothUnion(
-    //                 sd_plane,
-    //                 sd_large_columns,
-    //                 60.0,
-    //             ),
-    //             sd_columns,
-    //             5.0,
-    //         ),
-    //         20.0,
-    //     ),
-    //     sd_axes,
-    // ), sd_tetrahedron_data.y);
+    return min(
+        min(sd_axes, min(sd_tetrahedron, sd_runtime)),
+        sdPostSmoothUnion(
+            MAX_POSITIVE_F32, //p.y,
+            sdPostSmoothUnion(
+                sd_octa,
+                sdSphere(q, vec3<f32>(0.0, 0.0, 50.0 * sin(GLOBALS.time * 0.1)), 5.0),
+                4.0,
+            ),
+            4.0
+        )
+    );
 }
 
 fn sd_scene_material(p: vec3<f32>, base_color: vec3<f32>) -> PhongReflectionMaterial {
-    if (sd_scene_axes(p) < 0.001 && length(p) > 0.5) {
-        var color: vec3<f32>;
-        if (abs(p.x) > 0.5) {
-            color = vec3<f32>(0.5 + f32(p.x > 0.0) * 1.0, 0.2, 0.2);
-        } else if (abs(p.y) > 0.5) {
-            color = vec3<f32>(0.2, 0.5 + f32(p.y > 0.0) * 1.0, 0.2);
-        } else {
-            color = vec3<f32>(0.2, 0.2, 0.5 + f32(p.z > 0.0) * 1.0);
-        }
+    let sd =         sdPostSmoothUnion(
+            p.y,
+            sdPostSmoothUnion(
+                sd_fractal(p),
+                sdSphere(p, vec3<f32>(0.0, 0.0, 50.0 * sin(GLOBALS.time * 0.1)), 5.0),
+                4.0,
+            ),
+            3.9
+        );
 
-        return PhongReflectionMaterial(color, 0.0, 0.0, 0.9, 1.0);
+    if (true || (sd < 0.01 && p.y > 0.2)) {
+        return PhongReflectionMaterial(vec3<f32>(1.0, 0.0, 0.0), 5.0, 0.7, 0.05, 30.0);
     }
 
-    return PhongReflectionMaterial(base_color, 0.3, 0.7, 0.05, 30.0);
+    return PhongReflectionMaterial(base_color, 0.01, 0.7, 0.05, 30.0);
 }
 
-const NORMAL_EPSILON = 0.001;
+const NORMAL_EPSILON = 0.0001;
 
 fn sd_scene_normal(p: vec3<f32>) -> vec3<f32> {
-    return normalize(vec3(
-        sd_scene(vec3<f32>(p.x + NORMAL_EPSILON, p.y, p.z)).sd - sd_scene(vec3<f32>(p.x - NORMAL_EPSILON, p.y, p.z)).sd,
-        sd_scene(vec3<f32>(p.x, p.y + NORMAL_EPSILON, p.z)).sd - sd_scene(vec3<f32>(p.x, p.y - NORMAL_EPSILON, p.z)).sd,
-        sd_scene(vec3<f32>(p.x, p.y, p.z  + NORMAL_EPSILON)).sd - sd_scene(vec3<f32>(p.x, p.y, p.z - NORMAL_EPSILON)).sd
-    ));
+    let epsilon = NORMAL_EPSILON;
+
+    let dx = (
+        - sd_scene(vec3<f32>(p.x + 2.0 * epsilon, p.y, p.z))
+        + 8.0 * sd_scene(vec3<f32>(p.x + epsilon, p.y, p.z))
+        - 8.0 * sd_scene(vec3<f32>(p.x - epsilon, p.y, p.z))
+        + sd_scene(vec3<f32>(p.x - 2.0 * epsilon, p.y, p.z))
+    );
+
+    let dy = (
+        - sd_scene(vec3<f32>(p.x, p.y + 2.0 * epsilon, p.z))
+        + 8.0 * sd_scene(vec3<f32>(p.x, p.y + epsilon, p.z))
+        - 8.0 * sd_scene(vec3<f32>(p.x, p.y - epsilon, p.z))
+        + sd_scene(vec3<f32>(p.x, p.y - 2.0 * epsilon, p.z))
+    );
+
+    let dz = (
+        - sd_scene(vec3<f32>(p.x, p.y, p.z + 2.0 * epsilon))
+        + 8.0 * sd_scene(vec3<f32>(p.x, p.y, p.z + epsilon))
+        - 8.0 * sd_scene(vec3<f32>(p.x, p.y, p.z - epsilon))
+        + sd_scene(vec3<f32>(p.x, p.y, p.z - 2.0 * epsilon))
+    );
+
+    return normalize(vec3(dx, dy, dz));
 }

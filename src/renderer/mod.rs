@@ -13,9 +13,10 @@ use bevy::{
         Render, RenderApp, RenderSet,
     },
 };
+use rand::Rng;
 use std::borrow::Cow;
 
-use self::types::{RenderSDCompoundNode, RenderSDPrimitiveNode};
+use self::types::{RenderSDPrimitiveNode, RenderSDPreNode};
 
 pub mod types;
 
@@ -107,6 +108,7 @@ fn synchronize_globals(
     time: Res<Time>,
 ) {
     render_globals.time = time.elapsed_seconds();
+    render_globals.seed = rand::thread_rng().gen::<u32>();
 }
 
 fn synchronize_camera(
@@ -166,49 +168,25 @@ fn setup_buffers(
     render_queue: Res<RenderQueue>,
 ) {
     let mut sd_scene = RenderSDScene {
-        compound_count: 3,
-        compounds: [RenderSDCompoundNode::default(); 32],
-        primitive_count: 2,
-        primitives: [RenderSDPrimitiveNode::default(); 32],
+        pre_count: 16,
+        pre: [RenderSDPreNode::default(); 32],
+        primitive_count: 16,
+        primitive: [RenderSDPrimitiveNode::default(); 32],
     };
 
-    sd_scene.compounds[0] = RenderSDCompoundNode {
-        parent: 3,
-        children: [1, 2],
-        pre_translation: Vec3::new(1.0, 3.0, 0.0),
-        pre_scale: Vec3::ONE,
-        ..default()
-    };
+    for i in 0..32 {
+        sd_scene.pre[i] = RenderSDPreNode {
+            translation: Vec3::new(-15.0 + i as f32 * 2.0, 5.0, 5.0),
+            ..default()
+        };
+    }
 
-    sd_scene.compounds[1] = RenderSDCompoundNode {
-        parent: 0,
-        children: [1, 1],
-        pre_translation: Vec3::new(0.0, 2.0, -1.0),
-        pre_scale: Vec3::ONE,
-        ..default()
-    };
-
-    sd_scene.compounds[2] = RenderSDCompoundNode {
-        parent: 0,
-        children: [2, 2],
-        pre_translation: Vec3::new(-5.0, 1.0, 1.0),
-        pre_scale: Vec3::ONE,
-        ..default()
-    };
-
-    sd_scene.primitives[0] = RenderSDPrimitiveNode {
-        use_sphere: 1,
-        sphere: 0.5,
-        container: 1,
-        ..default()
-    };
-
-    sd_scene.primitives[1] = RenderSDPrimitiveNode {
-        use_block: 1,
-        block: Vec3::new(0.25, 1.0, 2.0),
-        container: 2,
-        ..default()
-    };
+    for i in 0..32 {
+        sd_scene.primitive[i] = RenderSDPrimitiveNode {
+            is_sphere: 1,
+            ..default()
+        };
+    }
 
     if let Some(mut common_buffers) = common_buffers {
         update_buffers!(
@@ -216,7 +194,6 @@ fn setup_buffers(
             globals_buffer, render_globals;
             camera_buffer, render_camera;
             scene_buffer, render_scene;
-            sd_scene_buffer, sd_scene;
         );
     } else {
         init_buffers!(
