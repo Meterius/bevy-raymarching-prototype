@@ -221,7 +221,7 @@ fn compile_shaders() {
         }
 
         result = result.replace("// DIRECTIVE import_buffers", buffers_content);
-        
+
         if path == Path::new("assets/shaders/render.wgsl") {
             result.push_str("\n");
             result.push_str(include_str!("assets/shaders/render_buffers.wgsl"));
@@ -251,17 +251,19 @@ fn is_shader_struct(item: &syn::ItemStruct) -> bool {
                         return false;
                     }
 
-                    return value.tokens.clone().into_iter().any(
-                        |tree| match tree {
-                            proc_macro2::TokenTree::Ident(ident) => ident == syn::Ident::new("ShaderType", proc_macro2::Span::call_site()),
-                            _ => false
+                    return value.tokens.clone().into_iter().any(|tree| match tree {
+                        proc_macro2::TokenTree::Ident(ident) => {
+                            ident == syn::Ident::new("ShaderType", proc_macro2::Span::call_site())
                         }
-                    );
+                        _ => false,
+                    });
                 } else {
                     return false;
                 }
-            },
-            _ => { return false; },
+            }
+            _ => {
+                return false;
+            }
         };
     })
 }
@@ -275,14 +277,18 @@ fn convert_shader_field_type(ty: &syn::Type) -> String {
         "Vec2" => return String::from("vec2<f32>"),
         "Vec3" => return String::from("vec3<f32>"),
         "Vec4" => return String::from("vec4<f32>"),
-        _ => {},
+        _ => {}
     };
 
     if type_name.starts_with("Vec < ") && type_name.ends_with(" >") {
         format!("array<{}>", &type_name[6..type_name.len() - 2])
     } else if type_name.starts_with("[") && type_name.ends_with("]") {
         let mut split = type_name[1..type_name.len() - 1].split(" ; ");
-        format!("array<{}, {}>", split.next().unwrap(), split.next().unwrap())
+        format!(
+            "array<{}, {}>",
+            split.next().unwrap(),
+            split.next().unwrap()
+        )
     } else {
         type_name
     }
@@ -293,7 +299,14 @@ fn generate_struct(def: &syn::ItemStruct, result: &mut String) {
 
     def.fields.iter().for_each(|field| {
         let translated_type_name = convert_shader_field_type(&field.ty);
-        result.push_str(format!("\t{}: {},\n", field.ident.as_ref().unwrap(), translated_type_name).as_str());
+        result.push_str(
+            format!(
+                "\t{}: {},\n",
+                field.ident.as_ref().unwrap(),
+                translated_type_name
+            )
+            .as_str(),
+        );
     });
 
     result.push_str("}\n\n");
@@ -307,10 +320,12 @@ fn compile_shader_structs() {
     ast.items.iter().for_each(|item| {
         match item {
             syn::Item::Struct(def) => {
-                if !is_shader_struct(def) { return; }
+                if !is_shader_struct(def) {
+                    return;
+                }
                 generate_struct(&def, &mut result);
-            },
-            _ => {},
+            }
+            _ => {}
         };
     });
 
@@ -323,5 +338,4 @@ fn compile_shader_structs() {
 fn main() {
     compile_shader_structs();
     compile_shaders();
-
 }

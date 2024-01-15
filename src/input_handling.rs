@@ -1,4 +1,4 @@
-use bevy::{prelude::*, app::AppExit};
+use bevy::{app::AppExit, prelude::*};
 
 use crate::renderer::types::RenderScene;
 
@@ -15,11 +15,10 @@ pub fn receive_input(
         - keyboard_input.pressed(KeyCode::Numpad2) as i32;
     let dr = Vec2::new(drx as _, dry as _).normalize_or_zero() * 0.01;
 
-    render_scene.sun_direction = (
-        Quat::from_axis_angle(Vec3::Y, -dr.x)
+    render_scene.sun_direction = (Quat::from_axis_angle(Vec3::Y, -dr.x)
         * Quat::from_axis_angle(Vec3::Y.cross(render_scene.sun_direction), -dr.y)
-        * render_scene.sun_direction
-    ).normalize();
+        * render_scene.sun_direction)
+        .normalize();
 
     if keyboard_input.just_pressed(KeyCode::Escape) {
         exit.send(AppExit);

@@ -1,4 +1,4 @@
-use crate::renderer::types::{RenderCamera, RenderGlobals, RenderScene, RenderSDScene};
+use crate::renderer::types::{RenderCamera, RenderGlobals, RenderSDScene, RenderScene};
 use bevy::core_pipeline::clear_color::ClearColorConfig;
 use bevy::render::renderer::RenderQueue;
 use bevy::window::PrimaryWindow;
@@ -16,7 +16,7 @@ use bevy::{
 use rand::Rng;
 use std::borrow::Cow;
 
-use self::types::{RenderSDPrimitiveNode, RenderSDPreNode};
+use self::types::{RenderSDPreNode, RenderSDPrimitiveNode};
 
 pub mod types;
 
@@ -103,10 +103,7 @@ fn synchronize_target_sprite(
     .extend(1.0);
 }
 
-fn synchronize_globals(
-    mut render_globals: ResMut<RenderGlobals>,
-    time: Res<Time>,
-) {
+fn synchronize_globals(mut render_globals: ResMut<RenderGlobals>, time: Res<Time>) {
     render_globals.time = time.elapsed_seconds();
     render_globals.seed = rand::thread_rng().gen::<u32>();
 }
@@ -159,7 +156,7 @@ macro_rules! update_buffers {
 fn setup_buffers(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
-    
+
     common_buffers: Option<ResMut<RenderCommonBuffers>>,
 
     render_globals: Res<RenderGlobals>,
@@ -267,7 +264,7 @@ macro_rules! group_layout_entry_uniform {
             },
             count: None,
         }
-    }
+    };
 }
 
 macro_rules! group_layout_entry_storage {
@@ -282,9 +279,8 @@ macro_rules! group_layout_entry_storage {
             },
             count: None,
         }
-    }
+    };
 }
-
 
 impl FromWorld for RayMarcherPipeline {
     fn from_world(world: &mut World) -> Self {
@@ -458,9 +454,14 @@ impl Plugin for RayMarcherRenderPlugin {
         ));
 
         app.add_systems(Startup, setup);
-        app.add_systems(PostUpdate, (
-            synchronize_camera, synchronize_globals, synchronize_target_sprite,
-        ));
+        app.add_systems(
+            PostUpdate,
+            (
+                synchronize_camera,
+                synchronize_globals,
+                synchronize_target_sprite,
+            ),
+        );
 
         // Render App Build
 

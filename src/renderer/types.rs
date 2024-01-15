@@ -1,4 +1,7 @@
-use bevy::{prelude::*, render::{extract_resource::ExtractResource, render_resource::ShaderType}};
+use bevy::{
+    prelude::*,
+    render::{extract_resource::ExtractResource, render_resource::ShaderType},
+};
 
 #[derive(Clone, Debug, Default, Resource, Reflect, ExtractResource, ShaderType)]
 #[reflect(Resource)]
