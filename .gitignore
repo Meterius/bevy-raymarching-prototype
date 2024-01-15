@@ -1,3 +1,5 @@
 /target
 assets/shaders/**/compiled
+assets/cuda/**/compiled
 assets/shaders/**/*.generated.wgsl
+cmake-build-debug

@@ -8,6 +8,7 @@ bevy = { version = "0.12.1" }
 bevy_editor_pls = "0.7.0"
 bevy_flycam = "0.12.0"
 bytemuck = "1.14.0"
+cudarc = "0.10.0"
 naga = "0.14.2"
 naga_oil = "0.11.0"
 rand = "0.8.5"
@@ -19,6 +20,8 @@ regex = "1.10.2"
 quote = "1.0.35"
 naga = "0.14.2"
 naga_oil = "0.11.0"
+bindgen = "0.69.2"
+cc = "1.0.83"
 
 [profile.dev]
 opt-level = 1

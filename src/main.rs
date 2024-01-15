@@ -6,6 +6,7 @@ use bevy::window::{CursorGrabMode, PresentMode, PrimaryWindow, WindowResolution}
 use bevy_editor_pls::EditorPlugin;
 use bevy_flycam::NoCameraPlayerPlugin;
 
+pub mod bindings;
 pub mod example_scene;
 pub mod input_handling;
 pub mod renderer;
