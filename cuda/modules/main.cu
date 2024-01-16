@@ -2,6 +2,7 @@
 #include "../includes/libraries/glm/glm.hpp"
 #include "../includes/ray_marching.cu"
 #include "../includes/rendering.cu"
+#include "../includes/utils.h"
 
 using namespace glm;
 
@@ -30,8 +31,23 @@ __device__ vec3 camera_to_ray(vec2 p, CameraBuffer CAMERA) {
 
 // scene
 
-__device__ float sd_scene(vec3 p) {
-    return length(p) - 1.0;
+__device__ auto make_sd_scene(
+    GlobalsBuffer& globals,
+    CameraBuffer& camera,
+    SdRuntimeScene& runtime_scene
+) {
+    return [&globals, &runtime_scene](vec3 p){
+        float sd = INFINITY;
+
+        for (int i = 0; i < runtime_scene.sphere_count; i++) {
+            sd = min(
+                sd,
+                length(p - from_array(runtime_scene.spheres[i].translation)) - runtime_scene.spheres[i].radius
+            );
+        }
+
+        return sd;
+    };
 }
 
 // ray-marching
@@ -42,7 +58,8 @@ extern "C" __global__ void render_depth(
      Texture render_texture,
      ConeMarchTextures cm_textures,
      GlobalsBuffer globals,
-     CameraBuffer camera
+     CameraBuffer camera,
+     SdRuntimeScene runtime_scene
 ) {
     u32 id = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -74,7 +91,7 @@ extern "C" __global__ void render_depth(
         ];
     }
 
-    RayMarchHit hit = ray_march<true>(sd_scene, ray, entry, cone_radius);
+    RayMarchHit hit = ray_march<true>(make_sd_scene(globals, camera, runtime_scene), ray, entry, cone_radius);
     cm_textures.textures[level].texture[id] = ConeMarchTextureValue { hit.depth, hit.steps, hit.outcome };
 }
 #endif
@@ -83,7 +100,8 @@ extern "C" __global__ void render(
     Texture render_texture,
     ConeMarchTextures cm_textures,
     GlobalsBuffer globals,
-    CameraBuffer camera
+    CameraBuffer camera,
+    SdRuntimeScene runtime_scene
 ) {
     u32 id = blockIdx.x * blockDim.x + threadIdx.x;
     uvec2 texture_coord = uvec2(id % render_texture.size[0], id / render_texture.size[0]);
@@ -104,7 +122,7 @@ extern "C" __global__ void render(
         ConeMarchTextureValue entry = { 0.0f, 0, Collision };
     #endif
 
-    vec3 color = render_ray(sd_scene, ray, entry);
+    vec3 color = render_ray(make_sd_scene(globals, camera, runtime_scene), ray, entry);
     vec3 mapped_color = clamp(color, 0.0f, 1.0f);
 
     unsigned int rgba = ((unsigned int)(255.0f * mapped_color.x) & 0xff) |

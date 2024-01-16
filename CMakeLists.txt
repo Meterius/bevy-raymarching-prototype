@@ -11,7 +11,7 @@ add_executable(
     cuda/includes/signed_distance.cu
     cuda/includes/rendering.cu
     cuda/includes/ray_marching.cu
-    cuda/modules/main.c
+    cuda/modules/main.cu
 )
 
 set_target_properties(bevy_raymarching_prototype PROPERTIES CUDA_SEPARABLE_COMPILATION ON)

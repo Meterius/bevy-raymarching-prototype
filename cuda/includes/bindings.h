@@ -44,8 +44,12 @@ struct CameraBuffer {
 
 // CPU
 
+struct SdRuntimeScene {
+    int sphere_count;
+    struct SdSphere* spheres;
+};
+
 struct SdSphere {
     float translation[3];
-    float rotation[3];
-    float scale[3];
+    float radius;
 };

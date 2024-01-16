@@ -1,4 +1,4 @@
-use crate::bindings::cuda::ConeMarchTextureValue;
+use crate::bindings::cuda::{ConeMarchTextureValue, SdRuntimeScene, SdSphere};
 use bevy::core_pipeline::clear_color::ClearColorConfig;
 use bevy::render::extract_resource::ExtractResource;
 use bevy::window::PrimaryWindow;
@@ -7,7 +7,7 @@ use cudarc::driver::{CudaDevice, CudaSlice, DevicePtr, LaunchAsync, LaunchConfig
 use cudarc::nvrtc::Ptx;
 use std::sync::Arc;
 
-const RENDER_TEXTURE_SIZE: (usize, usize) = (1920, 1080);
+const RENDER_TEXTURE_SIZE: (usize, usize) = (2560, 1440);
 
 const CUDA_GPU_BLOCK_SIZE: usize = 64;
 const CUDA_GPU_HARDWARE_MAX_PARALLEL_BLOCK_COUNT: usize = 128;
@@ -46,10 +46,13 @@ pub struct RenderTargetSprite {}
 #[derive(Clone, Resource, ExtractResource, Deref)]
 struct RenderTargetImage(Handle<Image>);
 
-struct RenderCuda {
-    device: Arc<CudaDevice>,
+#[derive(Deref)]
+struct RenderCudaDevice(Arc<CudaDevice>);
+
+struct RenderCudaBuffers {
     render_texture_buffer: CudaSlice<u8>,
     cm_texture_buffers: Vec<CudaSlice<ConeMarchTextureValue>>,
+    rt_sphere_buffer: CudaSlice<SdSphere>,
 }
 
 // App Systems
@@ -127,6 +130,8 @@ fn setup_cuda(world: &mut World) {
             .unwrap()
     };
 
+    let rt_sphere_buffer = unsafe { device.alloc::<SdSphere>(1024).unwrap() };
+
     let mut cm_texture_buffers = vec![];
 
     for i in 0..CONE_MARCH_LEVELS {
@@ -142,10 +147,11 @@ fn setup_cuda(world: &mut World) {
     }
 
     world.insert_resource(compression);
-    world.insert_non_send_resource(RenderCuda {
-        device,
+    world.insert_non_send_resource(RenderCudaDevice(device));
+    world.insert_non_send_resource(RenderCudaBuffers {
         render_texture_buffer,
         cm_texture_buffers,
+        rt_sphere_buffer,
     });
 }
 
@@ -153,7 +159,8 @@ fn render(
     compression: Res<RenderConeCompression>,
     time: Res<Time>,
     camera: Query<(&Camera, &Projection, &GlobalTransform), With<RenderCameraTarget>>,
-    render_cuda: NonSend<RenderCuda>,
+    render_device: NonSend<RenderCudaDevice>,
+    mut render_buffers: NonSendMut<RenderCudaBuffers>,
     render_target_image: Res<RenderTargetImage>,
     mut images: ResMut<Assets<Image>>,
     mut tick: Local<u64>,
@@ -163,10 +170,28 @@ fn render(
     let image = images.get_mut(&render_target_image.0).unwrap();
     let (cam, cam_projection, cam_transform) = camera.single();
 
-    render_cuda
-        .device
+    let mut spheres = Vec::with_capacity(1024);
+
+    for i in 0..1024 {
+        spheres.push(SdSphere {
+            translation: [
+                i as f32 * 0.7,
+                (time.elapsed_seconds() * (i as f32 / 10.0)).sin() * (i as f32 / 25.0),
+                (time.elapsed_seconds() * (i as f32 / 10.0)).cos() * (i as f32 / 25.0),
+            ],
+            radius: 0.3,
+        });
+    }
+
+    render_device
+        .0
+        .htod_copy_into(spheres, &mut render_buffers.rt_sphere_buffer)
+        .unwrap();
+
+    render_device
+        .0
         .dtoh_sync_copy_into(
-            &render_cuda.render_texture_buffer,
+            &render_buffers.render_texture_buffer,
             image.data.as_mut_slice(),
         )
         .unwrap();
@@ -194,8 +219,13 @@ fn render(
 
     unsafe {
         let render_texture = crate::bindings::cuda::Texture {
-            texture: std::mem::transmute(*(&render_cuda.render_texture_buffer).device_ptr()),
+            texture: std::mem::transmute(*(&render_buffers.render_texture_buffer).device_ptr()),
             size: [RENDER_TEXTURE_SIZE.0 as _, RENDER_TEXTURE_SIZE.1 as _],
+        };
+
+        let sd_runtime_scene = crate::bindings::cuda::SdRuntimeScene {
+            spheres: std::mem::transmute(*(&render_buffers.rt_sphere_buffer).device_ptr()),
+            sphere_count: 1024,
         };
 
         let mut cm_textures = vec![];
@@ -203,7 +233,7 @@ fn render(
         for i in 0..CONE_MARCH_LEVELS as u32 {
             cm_textures.push(crate::bindings::cuda::ConeMarchTexture {
                 texture: std::mem::transmute(
-                    *(&render_cuda.cm_texture_buffers[i as usize]).device_ptr(),
+                    *(&render_buffers.cm_texture_buffers[i as usize]).device_ptr(),
                 ),
                 size: [
                     (RENDER_TEXTURE_SIZE.0 as f32 / compression.levels[i as usize] as f32).ceil()
@@ -226,8 +256,8 @@ fn render(
                     / CUDA_GPU_BLOCK_SIZE as f32)
                     .round() as u32;
 
-                render_cuda
-                    .device
+                render_device
+                    .0
                     .get_func("main", "render_depth")
                     .unwrap()
                     .launch(
@@ -242,14 +272,15 @@ fn render(
                             cm_textures.clone(),
                             globals.clone(),
                             camera.clone(),
+                            sd_runtime_scene.clone(),
                         ),
                     )
                     .unwrap();
             }
         }
 
-        render_cuda
-            .device
+        render_device
+            .0
             .get_func("main", "render")
             .unwrap()
             .launch(
@@ -268,6 +299,7 @@ fn render(
                     cm_textures.clone(),
                     globals.clone(),
                     camera.clone(),
+                    sd_runtime_scene.clone(),
                 ),
             )
             .unwrap();
