@@ -71,7 +71,7 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
 
 // Render Systems
 
-const BLOCK_DIM: (u32, u32, u32) = (32, 32, 1);
+const BLOCK_DIM: (u32, u32, u32) = (64, 1, 1);
 
 fn setup_cuda(world: &mut World) {
     let start = std::time::Instant::now();
@@ -100,6 +100,7 @@ fn setup_cuda(world: &mut World) {
 }
 
 fn render(
+    time: Res<Time>,
     camera: Query<(&Camera, &Projection, &GlobalTransform), With<RenderCameraTarget>>,
     render_cuda: NonSend<RenderCuda>,
     render_target_image: Res<RenderTargetImage>,
@@ -128,8 +129,8 @@ fn render(
                 LaunchConfig {
                     block_dim: BLOCK_DIM,
                     grid_dim: (
-                        RENDER_TEXTURE_SIZE.0 as u32 / BLOCK_DIM.0,
-                        RENDER_TEXTURE_SIZE.1 as u32 / BLOCK_DIM.1,
+                        (RENDER_TEXTURE_SIZE.1 as u32 * RENDER_TEXTURE_SIZE.0 as u32) / BLOCK_DIM.0,
+                        1,
                         1,
                     ),
                     shared_mem_bytes: 0,
@@ -137,7 +138,7 @@ fn render(
                 (
                     &render_cuda.render_texture_buffer,
                     crate::bindings::cuda::GlobalsBuffer {
-                        time: 0.0,
+                        time: time.elapsed_seconds(),
                         tick: tick.clone(),
                         render_texture_size: [
                             RENDER_TEXTURE_SIZE.0 as u32,

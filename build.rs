@@ -30,6 +30,11 @@ fn compile_cuda() {
         .arg(&cuda_src)
         .arg(format!("-arch={}", arch))
         .arg(format!("-code={}", code))
+        //.arg("-G")
+        //.arg("-lineinfo")
+        .arg("-Xptxas")
+        .arg("-O3")
+        .arg("--use_fast_math")
         .status()
         .unwrap();
 
