@@ -1,6 +1,6 @@
 #pragma once
 
-#define CONE_MARCH_LEVELS 1
+#define CONE_MARCH_LEVELS 4
 // #define DISABLE_CONE_MARCH
 
 enum RayMarchHitOutcome {

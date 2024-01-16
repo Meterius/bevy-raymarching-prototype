@@ -12,7 +12,7 @@ const RENDER_TEXTURE_SIZE: (usize, usize) = (1920, 1080);
 const CUDA_GPU_BLOCK_SIZE: usize = 64;
 const CUDA_GPU_HARDWARE_MAX_PARALLEL_BLOCK_COUNT: usize = 128;
 
-const CONE_MARCH_LEVELS: usize = 1;
+const CONE_MARCH_LEVELS: usize = 4;
 
 #[derive(Debug, Clone, Resource)]
 pub struct RenderConeCompression {
@@ -24,15 +24,15 @@ impl Default for RenderConeCompression {
     fn default() -> Self {
         Self {
             enabled: true,
-            levels: [
-                // to improve resource utilization ensure compression
-                // is chosen such that every thread can be run in parallel
-                (RENDER_TEXTURE_SIZE.0 as f32 * RENDER_TEXTURE_SIZE.1 as f32
-                    / (CUDA_GPU_BLOCK_SIZE as f32
-                        * CUDA_GPU_HARDWARE_MAX_PARALLEL_BLOCK_COUNT as f32))
-                    .sqrt()
-                    .floor() as usize,
-            ],
+            levels: [16, 8, 4, 2], /*[
+                                       // to improve resource utilization ensure compression
+                                       // is chosen such that every thread can be run in parallel
+                                       (RENDER_TEXTURE_SIZE.0 as f32 * RENDER_TEXTURE_SIZE.1 as f32
+                                           / (CUDA_GPU_BLOCK_SIZE as f32
+                                               * CUDA_GPU_HARDWARE_MAX_PARALLEL_BLOCK_COUNT as f32))
+                                           .sqrt()
+                                           .floor() as usize,
+                                   ],*/
         }
     }
 }

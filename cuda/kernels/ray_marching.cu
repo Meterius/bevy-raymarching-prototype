@@ -19,9 +19,9 @@ struct __align__(32) Ray {
 };
 
 __forceinline__ __device__ RayMarchHit cone_march(Ray ray, float cone_radius, float time, ConeMarchTextureValue starting) {
-    RayMarchHit hit { starting.steps, ray.position + ray.direction * starting.depth, starting.depth, StepLimit };
+    RayMarchHit hit { 0, ray.position + ray.direction * starting.depth, starting.depth, StepLimit };
 
-    if (starting.outcome != Collision) {
+    if (starting.outcome == DepthLimit) {
         hit.outcome = starting.outcome;
         return hit;
     }
@@ -41,19 +41,20 @@ __forceinline__ __device__ RayMarchHit cone_march(Ray ray, float cone_radius, fl
         hit.position.y = glm::fma(diff, ray.direction.y, hit.position.y);
         hit.position.z = glm::fma(diff, ray.direction.z, hit.position.z);
 
-        if (hit.depth > 5000) {
+        if (hit.depth > 100000) {
             hit.outcome = DepthLimit;
             break;
         }
     }
 
+    hit.steps += starting.steps;
     return hit;
 }
 
 __forceinline__ __device__ RayMarchHit ray_march(Ray ray, float time, ConeMarchTextureValue starting) {
-    RayMarchHit hit { starting.steps, ray.position + ray.direction * starting.depth, starting.depth, StepLimit };
+    RayMarchHit hit { 0, ray.position + ray.direction * starting.depth, starting.depth, StepLimit };
 
-    if (starting.outcome != Collision) {
+    if (starting.outcome == DepthLimit) {
         hit.outcome = starting.outcome;
         return hit;
     }
@@ -71,11 +72,12 @@ __forceinline__ __device__ RayMarchHit ray_march(Ray ray, float time, ConeMarchT
         hit.position.y = fma(d, ray.direction.y, hit.position.y);
         hit.position.z = fma(d, ray.direction.z, hit.position.z);
 
-        if (hit.depth > 10000) {
+        if (hit.depth > 100000) {
             hit.outcome = DepthLimit;
             break;
         }
     }
 
+    hit.steps += starting.steps;
     return hit;
 }

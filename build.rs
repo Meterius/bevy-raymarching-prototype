@@ -42,7 +42,8 @@ fn compile_cuda() {
 
     if cfg!(debug_assertions) {
         warn!("Running NVCC in debug mode");
-        nvcc_cmd.arg("-lineinfo").arg("-G");
+        // nvcc_cmd.arg("-lineinfo").arg("-G");
+        nvcc_cmd.arg("-Xptxas").arg("-O3").arg("--use_fast_math");
     } else {
         nvcc_cmd.arg("-Xptxas").arg("-O3").arg("--use_fast_math");
     }
