@@ -3,3 +3,5 @@ assets/shaders/**/compiled
 assets/cuda/**/compiled
 assets/shaders/**/*.generated.wgsl
 cmake-build-debug
+src/bindings/cuda.rs
+cuda/includes/libraries/glm/**/*

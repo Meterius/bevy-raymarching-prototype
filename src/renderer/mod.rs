@@ -1,38 +1,15 @@
-use crate::renderer::types::{RenderCamera, RenderGlobals, RenderSDScene, RenderScene};
 use bevy::core_pipeline::clear_color::ClearColorConfig;
-use bevy::render::renderer::RenderQueue;
+use bevy::render::extract_resource::ExtractResource;
 use bevy::window::PrimaryWindow;
-use bevy::{
-    prelude::*,
-    render::{
-        extract_resource::{ExtractResource, ExtractResourcePlugin},
-        render_asset::RenderAssets,
-        render_graph::{self, RenderGraph},
-        render_resource::*,
-        renderer::{RenderContext, RenderDevice},
-        Render, RenderApp, RenderSet,
-    },
-};
-use rand::Rng;
-use std::borrow::Cow;
+use bevy::{prelude::*, render::render_resource::*};
+use cudarc::driver::{CudaDevice, CudaSlice, LaunchAsync, LaunchConfig};
+use cudarc::nvrtc::Ptx;
+use std::sync::Arc;
 
-use self::types::{RenderSDPreNode, RenderSDPrimitiveNode};
-
-pub mod types;
-
-const RENDER_TEXTURE_SIZE: (u32, u32) = (2560, 1440);
-const WORKGROUP_SIZE: u32 = 8;
+const RENDER_TEXTURE_SIZE: (usize, usize) = (1920, 1080);
 
 #[derive(Debug, Clone, Default, Component)]
 pub struct RenderCameraTarget {}
-
-#[derive(Resource)]
-pub struct RenderCommonBuffers {
-    globals_buffer: UniformBuffer<RenderGlobals>,
-    camera_buffer: UniformBuffer<RenderCamera>,
-    scene_buffer: UniformBuffer<RenderScene>,
-    sd_scene_buffer: StorageBuffer<RenderSDScene>,
-}
 
 #[derive(Clone, Debug, Default, Component)]
 pub struct RenderTargetSprite {}
@@ -40,16 +17,18 @@ pub struct RenderTargetSprite {}
 #[derive(Clone, Resource, ExtractResource, Deref)]
 struct RenderTargetImage(Handle<Image>);
 
-#[derive(Resource)]
-struct RenderBindGroup(BindGroup);
+struct RenderCuda {
+    device: Arc<CudaDevice>,
+    render_texture_buffer: CudaSlice<u8>,
+}
 
 // App Systems
 
 fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     let mut image = Image::new_fill(
         Extent3d {
-            width: RENDER_TEXTURE_SIZE.0,
-            height: RENDER_TEXTURE_SIZE.1,
+            width: RENDER_TEXTURE_SIZE.0 as u32,
+            height: RENDER_TEXTURE_SIZE.1 as u32,
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
@@ -90,6 +69,101 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     commands.insert_resource(RenderTargetImage(image));
 }
 
+// Render Systems
+
+const BLOCK_DIM: (u32, u32, u32) = (32, 32, 1);
+
+fn setup_cuda(world: &mut World) {
+    let start = std::time::Instant::now();
+
+    let device = CudaDevice::new(0).unwrap();
+
+    info!("CUDA Device Creation took {:.2?} seconds", start.elapsed());
+
+    let start = std::time::Instant::now();
+
+    let ptx = Ptx::from_src(include_str!("../../assets/cuda/compiled/renderer.ptx"));
+    device.load_ptx(ptx, "renderer", &["render"]).unwrap();
+
+    info!("CUDA PTX Loading took {:.2?} seconds", start.elapsed());
+
+    let render_texture_buffer = unsafe {
+        device
+            .alloc::<u8>(4 * RENDER_TEXTURE_SIZE.0 * RENDER_TEXTURE_SIZE.1)
+            .unwrap()
+    };
+
+    world.insert_non_send_resource(RenderCuda {
+        device,
+        render_texture_buffer,
+    });
+}
+
+fn render(
+    camera: Query<(&Camera, &Projection, &GlobalTransform), With<RenderCameraTarget>>,
+    render_cuda: NonSend<RenderCuda>,
+    render_target_image: Res<RenderTargetImage>,
+    mut images: ResMut<Assets<Image>>,
+    mut tick: Local<u64>,
+) {
+    *tick += 1;
+
+    let image = images.get_mut(&render_target_image.0).unwrap();
+    let (cam, cam_projection, cam_transform) = camera.single();
+
+    render_cuda
+        .device
+        .dtoh_sync_copy_into(
+            &render_cuda.render_texture_buffer,
+            image.data.as_mut_slice(),
+        )
+        .unwrap();
+
+    unsafe {
+        render_cuda
+            .device
+            .get_func("renderer", "render")
+            .unwrap()
+            .launch(
+                LaunchConfig {
+                    block_dim: BLOCK_DIM,
+                    grid_dim: (
+                        RENDER_TEXTURE_SIZE.0 as u32 / BLOCK_DIM.0,
+                        RENDER_TEXTURE_SIZE.1 as u32 / BLOCK_DIM.1,
+                        1,
+                    ),
+                    shared_mem_bytes: 0,
+                },
+                (
+                    &render_cuda.render_texture_buffer,
+                    crate::bindings::cuda::GlobalsBuffer {
+                        time: 0.0,
+                        tick: tick.clone(),
+                        render_texture_size: [
+                            RENDER_TEXTURE_SIZE.0 as u32,
+                            RENDER_TEXTURE_SIZE.1 as u32,
+                        ],
+                        render_screen_size: [
+                            cam.logical_viewport_size().map(|s| s.x).unwrap_or(1.0) as _,
+                            cam.logical_viewport_size().map(|s| s.y).unwrap_or(1.0) as _,
+                        ],
+                    },
+                    crate::bindings::cuda::CameraBuffer {
+                        position: cam_transform.translation().as_ref().clone(),
+                        forward: cam_transform.forward().as_ref().clone(),
+                        up: cam_transform.up().as_ref().clone(),
+                        right: cam_transform.right().as_ref().clone(),
+                        fov: match cam_projection {
+                            Projection::Perspective(perspective) => perspective.fov,
+                            Projection::Orthographic(_) => 1.0,
+                        },
+                    },
+                ),
+            )
+            .unwrap();
+    }
+}
+
 // Synchronization
 
 fn synchronize_target_sprite(
@@ -103,329 +177,9 @@ fn synchronize_target_sprite(
     .extend(1.0);
 }
 
-fn synchronize_globals(mut render_globals: ResMut<RenderGlobals>, time: Res<Time>) {
-    render_globals.time = time.elapsed_seconds();
-    render_globals.seed = rand::thread_rng().gen::<u32>();
-}
-
-fn synchronize_camera(
-    camera: Query<(&Camera, &GlobalTransform), With<RenderCameraTarget>>,
-    mut render_camera: ResMut<RenderCamera>,
-) {
-    let (cam, cam_transform) = camera.single();
-    render_camera.aspect_ratio = cam.logical_viewport_size().unwrap_or_default().x
-        / cam.logical_viewport_size().unwrap_or_default().y;
-    render_camera.position = cam_transform.translation();
-    render_camera.forward = cam_transform.forward();
-    render_camera.right = cam_transform.right();
-    render_camera.up = cam_transform.up();
-    render_camera.unit_plane_distance = 1.25;
-}
 // Render Systems
 
-macro_rules! init_buffers {
-    (
-        $render_device: ident, $render_queue: ident, $buffers_type: tt, $commands: ident;
-        $($name: ident, $data_name: ident, $buffer_type: tt;)+
-    ) => {
-        $(
-            let mut $name = $buffer_type :: from($data_name.clone());
-            $name.write_buffer(& $render_device, & $render_queue);
-        )+
-
-        $commands.insert_resource($buffers_type {
-            $($name),+
-        });
-    };
-}
-
-macro_rules! update_buffers {
-    (
-        $render_device: ident, $render_queue: ident, $buffers: ident;
-        $($name: ident, $data_name: ident;)+
-    ) => {
-        $(
-            $buffers.$name.set($data_name.clone());
-            $buffers
-                .$name
-                .write_buffer(& $render_device, & $render_queue);
-        )+
-    };
-}
-
-fn setup_buffers(
-    mut commands: Commands,
-    render_device: Res<RenderDevice>,
-
-    common_buffers: Option<ResMut<RenderCommonBuffers>>,
-
-    render_globals: Res<RenderGlobals>,
-    render_camera: Res<RenderCamera>,
-    render_scene: Res<RenderScene>,
-    render_queue: Res<RenderQueue>,
-) {
-    let mut sd_scene = RenderSDScene {
-        pre_count: 16,
-        pre: [RenderSDPreNode::default(); 32],
-        primitive_count: 16,
-        primitive: [RenderSDPrimitiveNode::default(); 32],
-    };
-
-    for i in 0..32 {
-        sd_scene.pre[i] = RenderSDPreNode {
-            translation: Vec3::new(-15.0 + i as f32 * 2.0, 5.0, 5.0),
-            ..default()
-        };
-    }
-
-    for i in 0..32 {
-        sd_scene.primitive[i] = RenderSDPrimitiveNode {
-            is_sphere: 1,
-            ..default()
-        };
-    }
-
-    if let Some(mut common_buffers) = common_buffers {
-        update_buffers!(
-            render_device, render_queue, common_buffers;
-            globals_buffer, render_globals;
-            camera_buffer, render_camera;
-            scene_buffer, render_scene;
-        );
-    } else {
-        init_buffers!(
-            render_device, render_queue, RenderCommonBuffers, commands;
-            globals_buffer, render_globals, UniformBuffer;
-            camera_buffer, render_camera, UniformBuffer;
-            scene_buffer, render_scene, UniformBuffer;
-            sd_scene_buffer, sd_scene, StorageBuffer;
-        );
-    }
-}
-
-fn prepare_bind_group(
-    mut commands: Commands,
-    pipeline: Res<RayMarcherPipeline>,
-    gpu_images: Res<RenderAssets<Image>>,
-    render_image: Res<RenderTargetImage>,
-    render_common_buffers: Res<RenderCommonBuffers>,
-    render_device: Res<RenderDevice>,
-) {
-    let view = gpu_images.get(&render_image.0).unwrap();
-
-    let common_bind_group = render_device.create_bind_group(
-        None,
-        &pipeline.common_bind_group_layout,
-        &[
-            BindGroupEntry {
-                binding: 0,
-                resource: BindingResource::TextureView(&view.texture_view),
-            },
-            BindGroupEntry {
-                binding: 1,
-                resource: render_common_buffers.globals_buffer.binding().unwrap(),
-            },
-            BindGroupEntry {
-                binding: 2,
-                resource: render_common_buffers.camera_buffer.binding().unwrap(),
-            },
-            BindGroupEntry {
-                binding: 3,
-                resource: render_common_buffers.scene_buffer.binding().unwrap(),
-            },
-            BindGroupEntry {
-                binding: 4,
-                resource: render_common_buffers.sd_scene_buffer.binding().unwrap(),
-            },
-        ],
-    );
-
-    commands.insert_resource(RenderBindGroup(common_bind_group));
-}
-
 // Render Pipeline
-
-#[derive(Resource)]
-pub struct RayMarcherPipeline {
-    common_bind_group_layout: BindGroupLayout,
-    init_pipeline: CachedComputePipelineId,
-    update_pipeline: CachedComputePipelineId,
-}
-
-macro_rules! group_layout_entry_uniform {
-    ($idx: tt) => {
-        BindGroupLayoutEntry {
-            binding: $idx,
-            visibility: ShaderStages::COMPUTE,
-            ty: BindingType::Buffer {
-                ty: BufferBindingType::Uniform,
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        }
-    };
-}
-
-macro_rules! group_layout_entry_storage {
-    ($idx: tt) => {
-        BindGroupLayoutEntry {
-            binding: $idx,
-            visibility: ShaderStages::COMPUTE,
-            ty: BindingType::Buffer {
-                ty: BufferBindingType::Storage { read_only: true },
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        }
-    };
-}
-
-impl FromWorld for RayMarcherPipeline {
-    fn from_world(world: &mut World) -> Self {
-        let common_bind_group_layout =
-            world
-                .resource::<RenderDevice>()
-                .create_bind_group_layout(&BindGroupLayoutDescriptor {
-                    label: None,
-                    entries: &[
-                        BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: ShaderStages::COMPUTE,
-                            ty: BindingType::StorageTexture {
-                                access: StorageTextureAccess::ReadWrite,
-                                format: TextureFormat::Rgba8Unorm,
-                                view_dimension: TextureViewDimension::D2,
-                            },
-                            count: None,
-                        },
-                        group_layout_entry_uniform!(1),
-                        group_layout_entry_uniform!(2),
-                        group_layout_entry_uniform!(3),
-                        group_layout_entry_storage!(4),
-                    ],
-                });
-
-        let shader = world
-            .resource::<AssetServer>()
-            .load("shaders/compiled/render.wgsl");
-
-        let pipeline_cache = world.resource::<PipelineCache>();
-        let init_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
-            label: None,
-            layout: vec![common_bind_group_layout.clone()],
-            push_constant_ranges: Vec::new(),
-            shader: shader.clone(),
-            shader_defs: vec![],
-            entry_point: Cow::from("init"),
-        });
-        let update_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
-            label: None,
-            layout: vec![common_bind_group_layout.clone()],
-            push_constant_ranges: Vec::new(),
-            shader,
-            shader_defs: vec![],
-            entry_point: Cow::from("update"),
-        });
-
-        RayMarcherPipeline {
-            common_bind_group_layout,
-            init_pipeline,
-            update_pipeline,
-        }
-    }
-}
-
-enum RayMarcherState {
-    Loading,
-    Init,
-    Update,
-}
-
-struct RayMarcherNode {
-    state: RayMarcherState,
-}
-
-impl Default for RayMarcherNode {
-    fn default() -> Self {
-        Self {
-            state: RayMarcherState::Loading,
-        }
-    }
-}
-
-impl render_graph::Node for RayMarcherNode {
-    fn update(&mut self, world: &mut World) {
-        let pipeline = world.resource::<RayMarcherPipeline>();
-        let pipeline_cache = world.resource::<PipelineCache>();
-
-        // if the corresponding pipeline has loaded, transition to the next stage
-        match self.state {
-            RayMarcherState::Loading => {
-                if let CachedPipelineState::Ok(_) =
-                    pipeline_cache.get_compute_pipeline_state(pipeline.init_pipeline)
-                {
-                    self.state = RayMarcherState::Init;
-                }
-            }
-            RayMarcherState::Init => {
-                if let CachedPipelineState::Ok(_) =
-                    pipeline_cache.get_compute_pipeline_state(pipeline.update_pipeline)
-                {
-                    self.state = RayMarcherState::Update;
-                }
-            }
-            RayMarcherState::Update => {}
-        }
-    }
-
-    fn run(
-        &self,
-        _graph: &mut render_graph::RenderGraphContext,
-        render_context: &mut RenderContext,
-        world: &World,
-    ) -> Result<(), render_graph::NodeRunError> {
-        let mut pass = render_context
-            .command_encoder()
-            .begin_compute_pass(&ComputePassDescriptor::default());
-
-        let RenderBindGroup(common_bind_group) = &world.resource::<RenderBindGroup>();
-        let pipeline_cache = world.resource::<PipelineCache>();
-        let pipeline = world.resource::<RayMarcherPipeline>();
-
-        pass.set_bind_group(0, common_bind_group, &[]);
-
-        // select the pipeline based on the current state
-        match self.state {
-            RayMarcherState::Loading => {}
-            RayMarcherState::Init => {
-                let init_pipeline = pipeline_cache
-                    .get_compute_pipeline(pipeline.init_pipeline)
-                    .unwrap();
-                pass.set_pipeline(init_pipeline);
-                pass.dispatch_workgroups(
-                    RENDER_TEXTURE_SIZE.0 / WORKGROUP_SIZE,
-                    RENDER_TEXTURE_SIZE.1 / WORKGROUP_SIZE,
-                    1,
-                );
-            }
-            RayMarcherState::Update => {
-                let update_pipeline = pipeline_cache
-                    .get_compute_pipeline(pipeline.update_pipeline)
-                    .unwrap();
-                pass.set_pipeline(update_pipeline);
-                pass.dispatch_workgroups(
-                    RENDER_TEXTURE_SIZE.0 / WORKGROUP_SIZE,
-                    RENDER_TEXTURE_SIZE.1 / WORKGROUP_SIZE,
-                    1,
-                );
-            }
-        }
-
-        Ok(())
-    }
-}
 
 // Plugin
 
@@ -435,53 +189,8 @@ pub struct RayMarcherRenderPlugin {}
 impl Plugin for RayMarcherRenderPlugin {
     fn build(&self, app: &mut App) {
         // Main App Build
-
-        app.insert_resource(RenderCamera::default());
-        app.insert_resource(RenderScene {
-            sun_direction: Vec3::new(0.5, 1.0, 3.0).normalize(),
-            ..default()
-        });
-        app.insert_resource(RenderGlobals {
-            render_texture_size: Vec2::new(RENDER_TEXTURE_SIZE.0 as _, RENDER_TEXTURE_SIZE.1 as _),
-            ..default()
-        });
-
-        app.add_plugins((
-            ExtractResourcePlugin::<RenderTargetImage>::default(),
-            ExtractResourcePlugin::<RenderCamera>::default(),
-            ExtractResourcePlugin::<RenderScene>::default(),
-            ExtractResourcePlugin::<RenderGlobals>::default(),
-        ));
-
-        app.add_systems(Startup, setup);
-        app.add_systems(
-            PostUpdate,
-            (
-                synchronize_camera,
-                synchronize_globals,
-                synchronize_target_sprite,
-            ),
-        );
-
-        // Render App Build
-
-        let render_app = app.sub_app_mut(RenderApp);
-
-        render_app.add_systems(
-            Render,
-            (
-                prepare_bind_group.in_set(RenderSet::PrepareBindGroups),
-                setup_buffers.in_set(RenderSet::PrepareResources),
-            ),
-        );
-
-        let mut render_graph = render_app.world.resource_mut::<RenderGraph>();
-        render_graph.add_node("ray_marcher", RayMarcherNode::default());
-        render_graph.add_node_edge("ray_marcher", bevy::render::main_graph::node::CAMERA_DRIVER);
-    }
-
-    fn finish(&self, app: &mut App) {
-        let render_app = app.sub_app_mut(RenderApp);
-        render_app.init_resource::<RayMarcherPipeline>();
+        app.add_systems(Startup, (setup, setup_cuda));
+        app.add_systems(Last, render);
+        app.add_systems(PostUpdate, (synchronize_target_sprite,));
     }
 }

@@ -1,7 +1,12 @@
-cmake_minimum_required(VERSION 3.27)
-project(bevy_raymarching_prototype)
+cmake_minimum_required(VERSION 3.16)
+project(bevy_raymarching_prototype CUDA)
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CUDA_STANDARD 14)
 
-include_directories(assets/cuda/includes)
+include_directories(cuda/includes)
+include_directories(cuda/kernels)
 
+add_executable(bevy_raymarching_prototype cuda/kernels/renderer.cu)
+
+set_target_properties(bevy_raymarching_prototype PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+set_target_properties(bevy_raymarching_prototype PROPERTIES CUDA_ARCHITECTURES OFF)
