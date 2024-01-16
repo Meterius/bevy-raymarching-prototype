@@ -41,3 +41,11 @@ struct CameraBuffer {
     float right[3];
     float fov;
 };
+
+// CPU
+
+struct SdSphere {
+    float translation[3];
+    float rotation[3];
+    float scale[3];
+};

@@ -114,9 +114,9 @@ fn setup_cuda(world: &mut World) {
 
     let start = std::time::Instant::now();
 
-    let ptx = Ptx::from_src(include_str!("../../assets/cuda/compiled/renderer.ptx"));
+    let ptx = Ptx::from_src(include_str!("../../assets/cuda/compiled/main.ptx"));
     device
-        .load_ptx(ptx, "renderer", &["render", "render_depth"])
+        .load_ptx(ptx, "main", &["render", "render_depth"])
         .unwrap();
 
     info!("CUDA PTX Loading took {:.2?} seconds", start.elapsed());
@@ -228,7 +228,7 @@ fn render(
 
                 render_cuda
                     .device
-                    .get_func("renderer", "render_depth")
+                    .get_func("main", "render_depth")
                     .unwrap()
                     .launch(
                         LaunchConfig {
@@ -250,7 +250,7 @@ fn render(
 
         render_cuda
             .device
-            .get_func("renderer", "render")
+            .get_func("main", "render")
             .unwrap()
             .launch(
                 LaunchConfig {

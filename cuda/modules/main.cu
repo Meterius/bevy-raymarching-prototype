@@ -1,6 +1,7 @@
 #include "../includes/bindings.h"
 #include "../includes/libraries/glm/glm.hpp"
-#include "./ray_marching.cu"
+#include "../includes/ray_marching.cu"
+#include "../includes/rendering.cu"
 
 using namespace glm;
 
@@ -27,12 +28,13 @@ __device__ vec3 camera_to_ray(vec2 p, CameraBuffer CAMERA) {
     );
 }
 
-// ray-marching
+// scene
 
-__forceinline__ __device__ vec3 render_ray(Ray ray, float time, ConeMarchTextureValue starting) {
-    RayMarchHit hit = ray_march(ray, time, starting);
-    return vec3(hit.depth * 0.001f, f32(hit.outcome == StepLimit), (float) hit.steps * 0.001f);
+__device__ float sd_scene(vec3 p) {
+    return length(p) - 1.0;
 }
+
+// ray-marching
 
 #ifndef DISABLE_CONE_MARCH
 extern "C" __global__ void render_depth(
@@ -72,7 +74,7 @@ extern "C" __global__ void render_depth(
         ];
     }
 
-    RayMarchHit hit = cone_march(ray, cone_radius, globals.time, entry);
+    RayMarchHit hit = ray_march<true>(sd_scene, ray, entry, cone_radius);
     cm_textures.textures[level].texture[id] = ConeMarchTextureValue { hit.depth, hit.steps, hit.outcome };
 }
 #endif
@@ -102,7 +104,7 @@ extern "C" __global__ void render(
         ConeMarchTextureValue entry = { 0.0f, 0, Collision };
     #endif
 
-    vec3 color = render_ray(ray, globals.time, entry);
+    vec3 color = render_ray(sd_scene, ray, entry);
     vec3 mapped_color = clamp(color, 0.0f, 1.0f);
 
     unsigned int rgba = ((unsigned int)(255.0f * mapped_color.x) & 0xff) |

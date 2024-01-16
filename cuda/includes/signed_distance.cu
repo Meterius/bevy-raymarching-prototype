@@ -22,7 +22,7 @@ __device__ vec3 wrap(vec3 p, vec3 lower, vec3 higher) {
 
 #define POWER 8.0f
 
-__forceinline__ __device__ float sd_mandelbulb(glm::vec3 p, float time) {
+__device__ float sd_mandelbulb(glm::vec3 p, float time) {
     glm::vec3 z = p;
     float dr = 1.0f;
     float r;
@@ -49,18 +49,10 @@ __forceinline__ __device__ float sd_mandelbulb(glm::vec3 p, float time) {
     return 0.5f * log(r) * r / dr;
 }
 
-// scene
+//
 
-__forceinline__ __device__ float sd_axes(glm::vec3 p) {
+__device__ float sd_axes(glm::vec3 p) {
     p.x = wrap(p.x, -0.5f, 0.5f);
     p.z = wrap(p.z, -0.5f, 0.5f);
     return length(p) - 0.05;
-}
-
-__forceinline__ __device__ float sd_scene(glm::vec3 p, float time) {
-    vec3 q = p;
-    q.x = wrap(q.x, -250.0f, 250.0f);
-    q.z = wrap(q.z, -250.0f, 250.0f);
-    // float axes = sd_axes(p);
-    return min(p.y + 0.5f, sd_mandelbulb(q / 200.0f, time) * 200.0f);
 }

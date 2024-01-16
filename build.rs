@@ -22,9 +22,9 @@ fn compile_cuda() {
     let arch = "compute_86"; // For example, using SM 8.6 (Ampere architecture).
     let code = "sm_86"; // For the same SM 8.6 (Ampere architecture).
 
-    // build the cuda kernels
-    let cuda_src = PathBuf::from("cuda/kernels/renderer.cu");
-    let ptx_file = "assets/cuda/compiled/renderer.ptx";
+    // build the cuda modules
+    let cuda_src = PathBuf::from("cuda/modules/main.cu");
+    let ptx_file = "assets/cuda/compiled/main.ptx";
 
     let mut path = std::env::var("PATH").unwrap();
     path.push_str(";C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.38.33130\\bin\\Hostx64\\x64;");
