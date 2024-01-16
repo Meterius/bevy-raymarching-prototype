@@ -1,4 +1,5 @@
 use regex::Regex;
+use std::ops::Deref;
 use std::path::PathBuf;
 
 // CUDA
@@ -66,8 +67,9 @@ fn compile_cuda() {
 
     // Regex to find raw pointers to float and replace them with CudaSlice<f32>
     // You can copy this regex to add/modify other types of pointers, for example "*mut i32"
-    let pointer_regex = Regex::new(r"\*mut f32").unwrap();
-    let modified_bindings = pointer_regex.replace_all(&generated_bindings, "CudaSlice<f32>");
+    let modified_bindings = generated_bindings;
+    let modified_bindings =
+        String::from("use cudarc::driver::CudaSlice;") + modified_bindings.deref();
 
     // Write the bindings to the $OUT_DIR/bindings.rs file.
     std::fs::write("src/bindings/cuda.rs", modified_bindings.as_bytes())

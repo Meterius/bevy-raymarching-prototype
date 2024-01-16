@@ -1,12 +1,17 @@
+use crate::bindings::cuda::DepthTextureEntry;
 use bevy::core_pipeline::clear_color::ClearColorConfig;
 use bevy::render::extract_resource::ExtractResource;
 use bevy::window::PrimaryWindow;
 use bevy::{prelude::*, render::render_resource::*};
-use cudarc::driver::{CudaDevice, CudaSlice, LaunchAsync, LaunchConfig};
+use cudarc::driver::{CudaDevice, CudaSlice, DevicePtr, DevicePtrMut, LaunchAsync, LaunchConfig};
 use cudarc::nvrtc::Ptx;
+use std::ops::Deref;
 use std::sync::Arc;
 
 const RENDER_TEXTURE_SIZE: (usize, usize) = (1920, 1080);
+
+const CONE_TRACING_LEVELS: usize = 1;
+const CONE_TRACING_OFFSET: usize = 3;
 
 #[derive(Debug, Clone, Default, Component)]
 pub struct RenderCameraTarget {}
@@ -20,6 +25,7 @@ struct RenderTargetImage(Handle<Image>);
 struct RenderCuda {
     device: Arc<CudaDevice>,
     render_texture_buffer: CudaSlice<u8>,
+    depth_texture_buffers: Vec<CudaSlice<DepthTextureEntry>>,
 }
 
 // App Systems
@@ -83,7 +89,9 @@ fn setup_cuda(world: &mut World) {
     let start = std::time::Instant::now();
 
     let ptx = Ptx::from_src(include_str!("../../assets/cuda/compiled/renderer.ptx"));
-    device.load_ptx(ptx, "renderer", &["render"]).unwrap();
+    device
+        .load_ptx(ptx, "renderer", &["render", "render_depth"])
+        .unwrap();
 
     info!("CUDA PTX Loading took {:.2?} seconds", start.elapsed());
 
@@ -93,9 +101,23 @@ fn setup_cuda(world: &mut World) {
             .unwrap()
     };
 
+    let mut depth_texture_buffers = vec![];
+
+    for i in 0..CONE_TRACING_LEVELS {
+        depth_texture_buffers.push(unsafe {
+            device
+                .alloc::<DepthTextureEntry>(
+                    (RENDER_TEXTURE_SIZE.0 >> (i + CONE_TRACING_OFFSET))
+                        * (RENDER_TEXTURE_SIZE.1 >> (i + CONE_TRACING_OFFSET)),
+                )
+                .unwrap()
+        });
+    }
+
     world.insert_non_send_resource(RenderCuda {
         device,
         render_texture_buffer,
+        depth_texture_buffers,
     });
 }
 
@@ -120,7 +142,75 @@ fn render(
         )
         .unwrap();
 
+    let globals = crate::bindings::cuda::GlobalsBuffer {
+        time: time.elapsed_seconds(),
+        tick: tick.clone(),
+        render_texture_size: [RENDER_TEXTURE_SIZE.0 as u32, RENDER_TEXTURE_SIZE.1 as u32],
+        render_screen_size: [
+            cam.logical_viewport_size().map(|s| s.x).unwrap_or(1.0) as _,
+            cam.logical_viewport_size().map(|s| s.y).unwrap_or(1.0) as _,
+        ],
+    };
+
+    let camera = crate::bindings::cuda::CameraBuffer {
+        position: cam_transform.translation().as_ref().clone(),
+        forward: cam_transform.forward().as_ref().clone(),
+        up: cam_transform.up().as_ref().clone(),
+        right: cam_transform.right().as_ref().clone(),
+        fov: match cam_projection {
+            Projection::Perspective(perspective) => perspective.fov,
+            Projection::Orthographic(_) => 1.0,
+        },
+    };
+
     unsafe {
+        for i in 0..CONE_TRACING_LEVELS {
+            let depth_texture = crate::bindings::cuda::DepthTexture {
+                texture: std::mem::transmute(
+                    *(&render_cuda.depth_texture_buffers[CONE_TRACING_LEVELS - 1]).device_ptr(),
+                ),
+                size: [
+                    (RENDER_TEXTURE_SIZE.0 >> (i + CONE_TRACING_OFFSET)) as _,
+                    (RENDER_TEXTURE_SIZE.1 >> (i + CONE_TRACING_OFFSET)) as _,
+                ],
+            };
+
+            render_cuda
+                .device
+                .get_func("renderer", "render_depth")
+                .unwrap()
+                .launch(
+                    LaunchConfig {
+                        block_dim: BLOCK_DIM,
+                        grid_dim: (
+                            ((RENDER_TEXTURE_SIZE.1 >> (i + CONE_TRACING_OFFSET)) as u32
+                                * (RENDER_TEXTURE_SIZE.0 >> (i + CONE_TRACING_OFFSET)) as u32)
+                                / BLOCK_DIM.0,
+                            1,
+                            1,
+                        ),
+                        shared_mem_bytes: 0,
+                    },
+                    (
+                        &render_cuda.render_texture_buffer,
+                        depth_texture,
+                        globals.clone(),
+                        camera.clone(),
+                    ),
+                )
+                .unwrap();
+        }
+
+        let depth_texture = crate::bindings::cuda::DepthTexture {
+            texture: std::mem::transmute(
+                *(&render_cuda.depth_texture_buffers[CONE_TRACING_LEVELS - 1]).device_ptr(),
+            ),
+            size: [
+                (RENDER_TEXTURE_SIZE.0 >> (CONE_TRACING_LEVELS - 1 + CONE_TRACING_OFFSET)) as _,
+                (RENDER_TEXTURE_SIZE.1 >> (CONE_TRACING_LEVELS - 1 + CONE_TRACING_OFFSET)) as _,
+            ],
+        };
+
         render_cuda
             .device
             .get_func("renderer", "render")
@@ -137,28 +227,9 @@ fn render(
                 },
                 (
                     &render_cuda.render_texture_buffer,
-                    crate::bindings::cuda::GlobalsBuffer {
-                        time: time.elapsed_seconds(),
-                        tick: tick.clone(),
-                        render_texture_size: [
-                            RENDER_TEXTURE_SIZE.0 as u32,
-                            RENDER_TEXTURE_SIZE.1 as u32,
-                        ],
-                        render_screen_size: [
-                            cam.logical_viewport_size().map(|s| s.x).unwrap_or(1.0) as _,
-                            cam.logical_viewport_size().map(|s| s.y).unwrap_or(1.0) as _,
-                        ],
-                    },
-                    crate::bindings::cuda::CameraBuffer {
-                        position: cam_transform.translation().as_ref().clone(),
-                        forward: cam_transform.forward().as_ref().clone(),
-                        up: cam_transform.up().as_ref().clone(),
-                        right: cam_transform.right().as_ref().clone(),
-                        fov: match cam_projection {
-                            Projection::Perspective(perspective) => perspective.fov,
-                            Projection::Orthographic(_) => 1.0,
-                        },
-                    },
+                    depth_texture,
+                    globals.clone(),
+                    camera.clone(),
                 ),
             )
             .unwrap();

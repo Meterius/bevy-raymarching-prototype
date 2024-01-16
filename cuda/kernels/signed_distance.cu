@@ -44,5 +44,8 @@ __forceinline__ __device__ float sd_mandelbulb(vec3 p, float time) {
 // scene
 
 __forceinline__ __device__ float sd_scene(vec3 p, float time) {
-    return sd_mandelbulb(p / 2000.0f - vec3(0.0, 0.0, -1.5f), time) * 2000.0f;
+    //p.x = wrap(p.x, -10.0f, 10.0f);
+    //return length(p) - 1.0f;
+
+    return sd_mandelbulb(p / 20.0f - vec3(0.0, 0.0, -1.5f), time) * 20.0f;
 }

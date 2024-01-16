@@ -1,5 +1,15 @@
 #pragma once
 
+struct DepthTextureEntry {
+    float depth;
+    int steps;
+};
+
+struct DepthTexture {
+    struct DepthTextureEntry* texture;
+    unsigned int size[2];
+};
+
 struct GlobalsBuffer {
     unsigned long long tick;
     float time;
