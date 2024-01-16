@@ -1,8 +1,7 @@
 #pragma once
 
 #include "../includes/libraries/glm/glm.hpp"
-
-using namespace glm;
+#include "../includes/utils.h"
 
 
 // signed-distance scene
@@ -15,8 +14,8 @@ __device__ float wrap(float x, float lower, float higher) {
 
 #define POWER 8.0f
 
-__forceinline__ __device__ float sd_mandelbulb(vec3 p, float time) {
-    vec3 z = p;
+__forceinline__ __device__ float sd_mandelbulb(glm::vec3 p, float time) {
+    glm::vec3 z = p;
     float dr = 1.0f;
     float r;
 
@@ -24,7 +23,7 @@ __forceinline__ __device__ float sd_mandelbulb(vec3 p, float time) {
 
     for (int i = 0; i < 20; i++) {
         r = length(z);
-        if (r > 2.0f) {
+        if (r > 4.0f) {
             break;
         }
 
@@ -33,9 +32,10 @@ __forceinline__ __device__ float sd_mandelbulb(vec3 p, float time) {
         float zr = pow(r, power);
         dr = pow(r, power - 1) * power * dr + 1;
 
-        z.x = fma(zr, sin(theta) * cos(phi), p.x);
-        z.y = fma(zr, sin(phi) * sin(theta), p.y);
-        z.z = fma(zr, cos(theta), p.z);
+        float s_theta = sin(theta);
+        z.x = glm::fma(zr, s_theta * cos(phi), p.x);
+        z.y = glm::fma(zr, sin(phi) * s_theta, p.y);
+        z.z = glm::fma(zr, cos(theta), p.z);
     }
 
     return 0.5f * log(r) * r / dr;
@@ -43,9 +43,9 @@ __forceinline__ __device__ float sd_mandelbulb(vec3 p, float time) {
 
 // scene
 
-__forceinline__ __device__ float sd_scene(vec3 p, float time) {
+__forceinline__ __device__ float sd_scene(glm::vec3 p, float time) {
     //p.x = wrap(p.x, -10.0f, 10.0f);
     //return length(p) - 1.0f;
 
-    return sd_mandelbulb(p / 20.0f - vec3(0.0, 0.0, -1.5f), time) * 20.0f;
+    return sd_mandelbulb(p / 2000.0f - glm::vec3(0.0, 0.0, -1.5f), time) * 2000.0f;
 }

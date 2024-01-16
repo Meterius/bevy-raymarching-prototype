@@ -6,10 +6,6 @@
 
 using namespace glm;
 
-enum RayMarchHitOutcome {
-    Collision, StepLimit, DepthLimit
-};
-
 struct __align__(32) RayMarchHit {
     int steps;
     vec3 position;
@@ -22,10 +18,15 @@ struct __align__(32) Ray {
     vec3 direction;
 };
 
-__forceinline__ __device__ RayMarchHit cone_march(Ray ray, float cone_radius, float time, DepthTextureEntry starting) {
+__forceinline__ __device__ RayMarchHit cone_march(Ray ray, float cone_radius, float time, ConeMarchTextureValue starting) {
     RayMarchHit hit { starting.steps, ray.position + ray.direction * starting.depth, starting.depth, StepLimit };
 
-    for (; hit.steps < 1000; hit.steps++) {
+    if (starting.outcome != Collision) {
+        hit.outcome = starting.outcome;
+        return hit;
+    }
+
+    for (; hit.steps < 500; hit.steps++) {
         float curr_cone_radius = cone_radius * (1.0f + hit.depth);
         float d = sd_scene(hit.position, time);
 
@@ -36,11 +37,11 @@ __forceinline__ __device__ RayMarchHit cone_march(Ray ray, float cone_radius, fl
 
         float diff = d;// - curr_cone_radius;
         hit.depth += diff;
-        hit.position.x = fma(diff, ray.direction.x, hit.position.x);
-        hit.position.y = fma(diff, ray.direction.y, hit.position.y);
-        hit.position.z = fma(diff, ray.direction.z, hit.position.z);
+        hit.position.x = glm::fma(diff, ray.direction.x, hit.position.x);
+        hit.position.y = glm::fma(diff, ray.direction.y, hit.position.y);
+        hit.position.z = glm::fma(diff, ray.direction.z, hit.position.z);
 
-        if (hit.depth > 10000) {
+        if (hit.depth > 5000) {
             hit.outcome = DepthLimit;
             break;
         }
@@ -49,8 +50,13 @@ __forceinline__ __device__ RayMarchHit cone_march(Ray ray, float cone_radius, fl
     return hit;
 }
 
-__forceinline__ __device__ RayMarchHit ray_march(Ray ray, float time, DepthTextureEntry starting) {
-    RayMarchHit hit { 0, ray.position + ray.direction * starting.depth, starting.depth, StepLimit };
+__forceinline__ __device__ RayMarchHit ray_march(Ray ray, float time, ConeMarchTextureValue starting) {
+    RayMarchHit hit { starting.steps, ray.position + ray.direction * starting.depth, starting.depth, StepLimit };
+
+    if (starting.outcome != Collision) {
+        hit.outcome = starting.outcome;
+        return hit;
+    }
 
     for (; hit.steps < 1000; hit.steps++) {
         float d = sd_scene(hit.position, time);

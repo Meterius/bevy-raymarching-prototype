@@ -1,17 +1,41 @@
-use crate::bindings::cuda::DepthTextureEntry;
+use crate::bindings::cuda::ConeMarchTextureValue;
 use bevy::core_pipeline::clear_color::ClearColorConfig;
 use bevy::render::extract_resource::ExtractResource;
 use bevy::window::PrimaryWindow;
 use bevy::{prelude::*, render::render_resource::*};
-use cudarc::driver::{CudaDevice, CudaSlice, DevicePtr, DevicePtrMut, LaunchAsync, LaunchConfig};
+use cudarc::driver::{CudaDevice, CudaSlice, DevicePtr, LaunchAsync, LaunchConfig};
 use cudarc::nvrtc::Ptx;
-use std::ops::Deref;
 use std::sync::Arc;
 
 const RENDER_TEXTURE_SIZE: (usize, usize) = (1920, 1080);
 
-const CONE_TRACING_LEVELS: usize = 1;
-const CONE_TRACING_OFFSET: usize = 3;
+const CUDA_GPU_BLOCK_SIZE: usize = 64;
+const CUDA_GPU_HARDWARE_MAX_PARALLEL_BLOCK_COUNT: usize = 128;
+
+const CONE_MARCH_LEVELS: usize = 1;
+
+#[derive(Debug, Clone, Resource)]
+pub struct RenderConeCompression {
+    enabled: bool,
+    levels: [usize; CONE_MARCH_LEVELS],
+}
+
+impl Default for RenderConeCompression {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            levels: [
+                // to improve resource utilization ensure compression
+                // is chosen such that every thread can be run in parallel
+                (RENDER_TEXTURE_SIZE.0 as f32 * RENDER_TEXTURE_SIZE.1 as f32
+                    / (CUDA_GPU_BLOCK_SIZE as f32
+                        * CUDA_GPU_HARDWARE_MAX_PARALLEL_BLOCK_COUNT as f32))
+                    .sqrt()
+                    .floor() as usize,
+            ],
+        }
+    }
+}
 
 #[derive(Debug, Clone, Default, Component)]
 pub struct RenderCameraTarget {}
@@ -25,7 +49,7 @@ struct RenderTargetImage(Handle<Image>);
 struct RenderCuda {
     device: Arc<CudaDevice>,
     render_texture_buffer: CudaSlice<u8>,
-    depth_texture_buffers: Vec<CudaSlice<DepthTextureEntry>>,
+    cm_texture_buffers: Vec<CudaSlice<ConeMarchTextureValue>>,
 }
 
 // App Systems
@@ -77,9 +101,11 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
 
 // Render Systems
 
-const BLOCK_DIM: (u32, u32, u32) = (64, 1, 1);
-
 fn setup_cuda(world: &mut World) {
+    let compression = RenderConeCompression::default();
+
+    info!("Ray Marcher Cone Marching Compression: {compression:?}");
+
     let start = std::time::Instant::now();
 
     let device = CudaDevice::new(0).unwrap();
@@ -101,27 +127,30 @@ fn setup_cuda(world: &mut World) {
             .unwrap()
     };
 
-    let mut depth_texture_buffers = vec![];
+    let mut cm_texture_buffers = vec![];
 
-    for i in 0..CONE_TRACING_LEVELS {
-        depth_texture_buffers.push(unsafe {
+    for i in 0..CONE_MARCH_LEVELS {
+        cm_texture_buffers.push(unsafe {
             device
-                .alloc::<DepthTextureEntry>(
-                    (RENDER_TEXTURE_SIZE.0 >> (i + CONE_TRACING_OFFSET))
-                        * (RENDER_TEXTURE_SIZE.1 >> (i + CONE_TRACING_OFFSET)),
+                .alloc::<ConeMarchTextureValue>(
+                    (RENDER_TEXTURE_SIZE.0 as f32 / compression.levels[i] as f32).ceil() as usize
+                        * (RENDER_TEXTURE_SIZE.1 as f32 / compression.levels[i] as f32).ceil()
+                            as usize,
                 )
                 .unwrap()
         });
     }
 
+    world.insert_resource(compression);
     world.insert_non_send_resource(RenderCuda {
         device,
         render_texture_buffer,
-        depth_texture_buffers,
+        cm_texture_buffers,
     });
 }
 
 fn render(
+    compression: Res<RenderConeCompression>,
     time: Res<Time>,
     camera: Query<(&Camera, &Projection, &GlobalTransform), With<RenderCameraTarget>>,
     render_cuda: NonSend<RenderCuda>,
@@ -164,52 +193,60 @@ fn render(
     };
 
     unsafe {
-        for i in 0..CONE_TRACING_LEVELS {
-            let depth_texture = crate::bindings::cuda::DepthTexture {
+        let render_texture = crate::bindings::cuda::Texture {
+            texture: std::mem::transmute(*(&render_cuda.render_texture_buffer).device_ptr()),
+            size: [RENDER_TEXTURE_SIZE.0 as _, RENDER_TEXTURE_SIZE.1 as _],
+        };
+
+        let mut cm_textures = vec![];
+
+        for i in 0..CONE_MARCH_LEVELS as u32 {
+            cm_textures.push(crate::bindings::cuda::ConeMarchTexture {
                 texture: std::mem::transmute(
-                    *(&render_cuda.depth_texture_buffers[CONE_TRACING_LEVELS - 1]).device_ptr(),
+                    *(&render_cuda.cm_texture_buffers[i as usize]).device_ptr(),
                 ),
                 size: [
-                    (RENDER_TEXTURE_SIZE.0 >> (i + CONE_TRACING_OFFSET)) as _,
-                    (RENDER_TEXTURE_SIZE.1 >> (i + CONE_TRACING_OFFSET)) as _,
+                    (RENDER_TEXTURE_SIZE.0 as f32 / compression.levels[i as usize] as f32).ceil()
+                        as u32,
+                    (RENDER_TEXTURE_SIZE.1 as f32 / compression.levels[i as usize] as f32).ceil()
+                        as u32,
                 ],
-            };
-
-            render_cuda
-                .device
-                .get_func("renderer", "render_depth")
-                .unwrap()
-                .launch(
-                    LaunchConfig {
-                        block_dim: BLOCK_DIM,
-                        grid_dim: (
-                            ((RENDER_TEXTURE_SIZE.1 >> (i + CONE_TRACING_OFFSET)) as u32
-                                * (RENDER_TEXTURE_SIZE.0 >> (i + CONE_TRACING_OFFSET)) as u32)
-                                / BLOCK_DIM.0,
-                            1,
-                            1,
-                        ),
-                        shared_mem_bytes: 0,
-                    },
-                    (
-                        &render_cuda.render_texture_buffer,
-                        depth_texture,
-                        globals.clone(),
-                        camera.clone(),
-                    ),
-                )
-                .unwrap();
+            });
         }
 
-        let depth_texture = crate::bindings::cuda::DepthTexture {
-            texture: std::mem::transmute(
-                *(&render_cuda.depth_texture_buffers[CONE_TRACING_LEVELS - 1]).device_ptr(),
-            ),
-            size: [
-                (RENDER_TEXTURE_SIZE.0 >> (CONE_TRACING_LEVELS - 1 + CONE_TRACING_OFFSET)) as _,
-                (RENDER_TEXTURE_SIZE.1 >> (CONE_TRACING_LEVELS - 1 + CONE_TRACING_OFFSET)) as _,
-            ],
+        let cm_textures = crate::bindings::cuda::ConeMarchTextures {
+            textures: cm_textures.try_into().unwrap(),
         };
+
+        if compression.enabled {
+            for i in 0..CONE_MARCH_LEVELS as u32 {
+                let grid_size = ((cm_textures.textures[i as usize].size[0]
+                    * cm_textures.textures[i as usize].size[0])
+                    as f32
+                    / CUDA_GPU_BLOCK_SIZE as f32)
+                    .round() as u32;
+
+                render_cuda
+                    .device
+                    .get_func("renderer", "render_depth")
+                    .unwrap()
+                    .launch(
+                        LaunchConfig {
+                            block_dim: (CUDA_GPU_BLOCK_SIZE as u32, 1, 1),
+                            grid_dim: (grid_size, 1, 1),
+                            shared_mem_bytes: 0,
+                        },
+                        (
+                            i,
+                            render_texture.clone(),
+                            cm_textures.clone(),
+                            globals.clone(),
+                            camera.clone(),
+                        ),
+                    )
+                    .unwrap();
+            }
+        }
 
         render_cuda
             .device
@@ -217,17 +254,18 @@ fn render(
             .unwrap()
             .launch(
                 LaunchConfig {
-                    block_dim: BLOCK_DIM,
+                    block_dim: (CUDA_GPU_BLOCK_SIZE as u32, 1, 1),
                     grid_dim: (
-                        (RENDER_TEXTURE_SIZE.1 as u32 * RENDER_TEXTURE_SIZE.0 as u32) / BLOCK_DIM.0,
+                        (RENDER_TEXTURE_SIZE.1 as u32 * RENDER_TEXTURE_SIZE.0 as u32)
+                            / (CUDA_GPU_BLOCK_SIZE as u32),
                         1,
                         1,
                     ),
                     shared_mem_bytes: 0,
                 },
                 (
-                    &render_cuda.render_texture_buffer,
-                    depth_texture,
+                    render_texture.clone(),
+                    cm_textures.clone(),
                     globals.clone(),
                     camera.clone(),
                 ),

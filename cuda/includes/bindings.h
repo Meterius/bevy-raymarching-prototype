@@ -1,12 +1,29 @@
 #pragma once
 
-struct DepthTextureEntry {
-    float depth;
-    int steps;
+#define CONE_MARCH_LEVELS 1
+// #define DISABLE_CONE_MARCH
+
+enum RayMarchHitOutcome {
+    Collision, StepLimit, DepthLimit
 };
 
-struct DepthTexture {
-    struct DepthTextureEntry* texture;
+struct ConeMarchTextureValue {
+    float depth;
+    int steps;
+    enum RayMarchHitOutcome outcome;
+};
+
+struct ConeMarchTexture {
+    struct ConeMarchTextureValue* texture;
+    unsigned int size[2];
+};
+
+struct ConeMarchTextures {
+    struct ConeMarchTexture textures[CONE_MARCH_LEVELS];
+};
+
+struct Texture {
+    unsigned int* texture;
     unsigned int size[2];
 };
 

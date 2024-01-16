@@ -1,4 +1,3 @@
-use regex::Regex;
 use std::ops::Deref;
 use std::path::PathBuf;
 
@@ -7,6 +6,13 @@ use std::path::PathBuf;
 extern crate cc;
 
 use std::process::Command;
+
+#[allow(unused_macros)]
+macro_rules! warn {
+    ($($tokens: tt)*) => {
+        println!("cargo:warning={}", format!($($tokens)*))
+    }
+}
 
 fn compile_cuda() {
     // Tell cargo to invalidate the built crate whenever fils of interest changes.
@@ -23,21 +29,25 @@ fn compile_cuda() {
     let mut path = std::env::var("PATH").unwrap();
     path.push_str(";C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.38.33130\\bin\\Hostx64\\x64;");
 
-    let nvcc_status = Command::new("nvcc")
+    let mut nvcc_cmd = Command::new("nvcc");
+
+    nvcc_cmd
         .env("PATH", path)
         .arg("-ptx")
         .arg("-o")
         .arg(&ptx_file)
         .arg(&cuda_src)
         .arg(format!("-arch={}", arch))
-        .arg(format!("-code={}", code))
-        //.arg("-G")
-        //.arg("-lineinfo")
-        .arg("-Xptxas")
-        .arg("-O3")
-        .arg("--use_fast_math")
-        .status()
-        .unwrap();
+        .arg(format!("-code={}", code));
+
+    if cfg!(debug_assertions) {
+        warn!("Running NVCC in debug mode");
+        nvcc_cmd.arg("-lineinfo").arg("-G");
+    } else {
+        nvcc_cmd.arg("-Xptxas").arg("-O3").arg("--use_fast_math");
+    }
+
+    let nvcc_status = nvcc_cmd.status().unwrap();
 
     assert!(
         nvcc_status.success(),
@@ -68,8 +78,7 @@ fn compile_cuda() {
     // Regex to find raw pointers to float and replace them with CudaSlice<f32>
     // You can copy this regex to add/modify other types of pointers, for example "*mut i32"
     let modified_bindings = generated_bindings;
-    let modified_bindings =
-        String::from("use cudarc::driver::CudaSlice;") + modified_bindings.deref();
+    let modified_bindings = String::from("#![allow(warnings)]\n") + modified_bindings.deref();
 
     // Write the bindings to the $OUT_DIR/bindings.rs file.
     std::fs::write("src/bindings/cuda.rs", modified_bindings.as_bytes())

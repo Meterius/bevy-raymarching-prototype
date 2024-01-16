@@ -1,6 +1,5 @@
 #include "../includes/bindings.h"
 #include "../includes/libraries/glm/glm.hpp"
-#include "./signed_distance.cu"
 #include "./ray_marching.cu"
 
 using namespace glm;
@@ -9,6 +8,10 @@ using namespace glm;
 
 __device__ vec2 texture_to_ndc(uvec2 p, vec2 texture_size) {
     return ((vec2) p + vec2(0.5f, 0.5f)) / texture_size;
+}
+
+__device__ uvec2 ndc_to_texture(vec2 p, vec2 texture_size) {
+    return uvec2(round((p * texture_size) - vec2(0.5f, 0.5f)));
 }
 
 __device__ vec2 ndc_to_camera(vec2 p, vec2 render_screen_size) {
@@ -26,39 +29,78 @@ __device__ vec3 camera_to_ray(vec2 p, CameraBuffer CAMERA) {
 
 // ray-marching
 
-__forceinline__ __device__ vec3 render_ray(Ray ray, float time, DepthTextureEntry starting) {
+__forceinline__ __device__ vec3 render_ray(Ray ray, float time, ConeMarchTextureValue starting) {
     RayMarchHit hit = ray_march(ray, time, starting);
     return vec3(hit.depth * 0.001f, f32(hit.outcome == StepLimit), (float) hit.steps * 0.001f);
 }
 
-
-extern "C" __global__ void render_depth(char *render_texture, DepthTexture depth_texture, GlobalsBuffer globals, CameraBuffer camera) {
+#ifndef DISABLE_CONE_MARCH
+extern "C" __global__ void render_depth(
+     unsigned int level,
+     Texture render_texture,
+     ConeMarchTextures cm_textures,
+     GlobalsBuffer globals,
+     CameraBuffer camera
+) {
     u32 id = blockIdx.x * blockDim.x + threadIdx.x;
-    uvec2 depth_texture_coord = uvec2(id % depth_texture.size[0], id / depth_texture.size[0]);
-    vec2 ndc_coord = texture_to_ndc(depth_texture_coord, {depth_texture.size[0], depth_texture.size[1] });
-    vec2 cam_coord = ndc_to_camera(ndc_coord, { depth_texture.size[0], depth_texture.size[1] });
+
+    if (id > cm_textures.textures[level].size[0] * cm_textures.textures[level].size[1]) {
+        return;
+    }
+
+    uvec2 cm_texture_coord = uvec2(id % cm_textures.textures[level].size[0], id / cm_textures.textures[level].size[0]);
+    vec2 ndc_coord = texture_to_ndc(cm_texture_coord, {cm_textures.textures[level].size[0], cm_textures.textures[level].size[1] });
+    vec2 cam_coord = ndc_to_camera(ndc_coord, { cm_textures.textures[level].size[0], cm_textures.textures[level].size[1] });
     Ray ray { { camera.position[0], camera.position[1], camera.position[2] }, camera_to_ray(cam_coord, camera) };
 
-    float aspect_ratio = (float) globals.render_texture_size[0] / (float) globals.render_texture_size[1];
+    float aspect_ratio = (float) render_texture.size[0] / (float) render_texture.size[1];
     float fov_fac = tan(camera.fov / 2);
     float cone_radius = length(vec2(
-            (2.0f * aspect_ratio * fov_fac) / (float) depth_texture.size[0],
-            (2.0f * fov_fac) / (float) depth_texture.size[1]
+        (2.0f * aspect_ratio * fov_fac) / (float) cm_textures.textures[level].size[0],
+        (2.0f * fov_fac) / (float) cm_textures.textures[level].size[1]
     ));
 
-    RayMarchHit hit = cone_march(ray, cone_radius, globals.time, DepthTextureEntry { 0.0, 0 });
-    depth_texture.texture[id] = DepthTextureEntry { hit.depth, hit.steps };
-}
+    ConeMarchTextureValue entry { 0.0f, 0, Collision };
+    if (level > 0) {
+        uvec2 lower_cm_texture_coord = ndc_to_texture(
+        ndc_coord,
+        { (float) cm_textures.textures[level - 1].size[0], (float) cm_textures.textures[level - 1].size[1] }
+        );
 
-extern "C" __global__ void render(char *render_texture, DepthTexture depth_texture, GlobalsBuffer globals, CameraBuffer camera)
-{
+        entry = cm_textures.textures[level - 1].texture[
+            lower_cm_texture_coord.x + cm_textures.textures[level - 1].size[0] * lower_cm_texture_coord.y
+        ];
+    }
+
+    RayMarchHit hit = cone_march(ray, cone_radius, globals.time, entry);
+    cm_textures.textures[level].texture[id] = ConeMarchTextureValue { hit.depth, hit.steps, hit.outcome };
+}
+#endif
+
+extern "C" __global__ void render(
+    Texture render_texture,
+    ConeMarchTextures cm_textures,
+    GlobalsBuffer globals,
+    CameraBuffer camera
+) {
     u32 id = blockIdx.x * blockDim.x + threadIdx.x;
-    uvec2 texture_coord = uvec2(id % globals.render_texture_size[0], id / globals.render_texture_size[0]);
-    vec2 ndc_coord = texture_to_ndc(texture_coord, {globals.render_texture_size[0], globals.render_texture_size[1] });
-    vec2 cam_coord = ndc_to_camera(ndc_coord, { globals.render_texture_size[0], globals.render_texture_size[1] });
+    uvec2 texture_coord = uvec2(id % render_texture.size[0], id / render_texture.size[0]);
+    vec2 ndc_coord = texture_to_ndc(texture_coord, {render_texture.size[0], render_texture.size[1] });
+    vec2 cam_coord = ndc_to_camera(ndc_coord, { render_texture.size[0], render_texture.size[1] });
     Ray ray { { camera.position[0], camera.position[1], camera.position[2] }, camera_to_ray(cam_coord, camera) };
 
-    DepthTextureEntry entry = depth_texture.texture[texture_coord.x / 8 + depth_texture.size[0] * (texture_coord.y / 8)];
+    #ifndef DISABLE_CONE_MARCH
+        uvec2 cm_texture_coord = ndc_to_texture(
+            ndc_coord,
+            { (float) cm_textures.textures[CONE_MARCH_LEVELS - 1].size[0], (float) cm_textures.textures[CONE_MARCH_LEVELS - 1].size[1] }
+        );
+
+        ConeMarchTextureValue entry = cm_textures.textures[CONE_MARCH_LEVELS - 1].texture[
+            cm_texture_coord.x + cm_textures.textures[CONE_MARCH_LEVELS - 1].size[0] * cm_texture_coord.y
+        ];
+    #else
+        ConeMarchTextureValue entry = { 0.0f, 0, Collision };
+    #endif
 
     vec3 color = render_ray(ray, globals.time, entry);
     vec3 mapped_color = clamp(color, 0.0f, 1.0f);
@@ -67,11 +109,5 @@ extern "C" __global__ void render(char *render_texture, DepthTexture depth_textu
                         (((unsigned int)(255.0f * mapped_color.y) & 0xff) << 8) |
                         (((unsigned int)(255.0f * mapped_color.z) & 0xff) << 16) |
                         (255 << 24);
-    ((unsigned int*)render_texture)[id] = rgba;
-
-    /*auto intensity = (unsigned int) (
-        255.0 * clamp(depth_texture.texture[texture_coord.x / 16 + depth_texture.size[0] * (texture_coord.y / 16)] / 100.0, 0.0, 1.0)
-    );
-    unsigned int rgba = (intensity) | (intensity << 8) | (intensity << 16) | (255 << 24);
-    ((unsigned int*)render_texture)[id] = rgba;*/
+    render_texture.texture[id] = rgba;
 }

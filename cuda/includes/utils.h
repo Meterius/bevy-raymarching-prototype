@@ -4,6 +4,9 @@
 
 using namespace glm;
 
+#define PI 3.14159265358979323846264338327950288f
+#define PI_HALF 1.5707963267948966f
+
 float minimum(vec3 p) {
     return min(min(p.x, p.y), p.z);
 }
