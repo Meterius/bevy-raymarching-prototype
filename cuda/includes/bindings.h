@@ -7,6 +7,20 @@ enum RayMarchHitOutcome {
     Collision, StepLimit, DepthLimit
 };
 
+struct RenderDataTextureValue {
+    float depth;
+    float steps;
+    enum RayMarchHitOutcome outcome;
+    float color[3];
+    float light;
+    float padding;
+};
+
+struct RenderDataTexture {
+    struct RenderDataTextureValue* texture;
+    unsigned int size[2];
+};
+
 struct ConeMarchTextureValue {
     float depth;
     int steps;

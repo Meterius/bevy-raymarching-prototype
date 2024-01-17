@@ -4,8 +4,10 @@
 #include "./ray_marching.cu"
 
 template<typename SdSceneFunc>
-__device__ vec3 render_ray(SdSceneFunc sd_scene, Ray ray, ConeMarchTextureValue starting) {
+__device__ RenderDataTextureValue render_ray(SdSceneFunc sd_scene, Ray ray, ConeMarchTextureValue starting) {
     RayMarchHit hit = ray_march<false>(sd_scene, ray, starting);
-    return vec3(clamp(hit.steps * 0.01f, 0.0f, 1.0f));
-    // return vec3(hit.depth * 0.001f, f32(hit.outcome == StepLimit), (float) hit.steps * 0.001f);
+
+    return {
+        hit.depth, (float) hit.steps, hit.outcome, { 1.0f, 1.0f, 1.0f }, 1.0f
+    };
 }

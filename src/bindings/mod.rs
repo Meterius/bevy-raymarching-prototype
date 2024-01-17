@@ -10,3 +10,4 @@ unsafe impl DeviceRepr for cuda::SdSphere {}
 unsafe impl DeviceRepr for cuda::SdRuntimeScene {}
 unsafe impl DeviceRepr for cuda::Texture {}
 unsafe impl DeviceRepr for cuda::ConeMarchTextureValue {}
+unsafe impl DeviceRepr for cuda::RenderDataTextureValue {}

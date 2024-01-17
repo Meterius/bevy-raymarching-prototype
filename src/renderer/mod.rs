@@ -1,9 +1,9 @@
-use crate::bindings::cuda::{ConeMarchTextureValue, SdRuntimeScene, SdSphere};
+use crate::bindings::cuda::{ConeMarchTextureValue, RenderDataTextureValue, SdSphere};
 use bevy::core_pipeline::clear_color::ClearColorConfig;
 use bevy::render::extract_resource::ExtractResource;
 use bevy::window::PrimaryWindow;
 use bevy::{prelude::*, render::render_resource::*};
-use cudarc::driver::{CudaDevice, CudaSlice, DevicePtr, LaunchAsync, LaunchConfig};
+use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice, DevicePtr, LaunchAsync, LaunchConfig};
 use cudarc::nvrtc::Ptx;
 use std::sync::Arc;
 
@@ -47,11 +47,14 @@ pub struct RenderTargetSprite {}
 #[derive(Clone, Resource, ExtractResource, Deref)]
 struct RenderTargetImage(Handle<Image>);
 
-#[derive(Deref)]
-struct RenderCudaDevice(Arc<CudaDevice>);
+struct RenderCudaContext {
+    device: Arc<CudaDevice>,
+}
 
 struct RenderCudaBuffers {
+    render_data_texture_buffer: CudaSlice<RenderDataTextureValue>,
     render_texture_buffer: CudaSlice<u8>,
+
     cm_texture_buffers: Vec<CudaSlice<ConeMarchTextureValue>>,
     rt_sphere_buffer: CudaSlice<SdSphere>,
 }
@@ -120,7 +123,15 @@ fn setup_cuda(world: &mut World) {
 
     let ptx = Ptx::from_src(include_str!("../../assets/cuda/compiled/main.ptx"));
     device
-        .load_ptx(ptx, "main", &["render", "render_depth"])
+        .load_ptx(
+            ptx,
+            "main",
+            &[
+                "compute_compressed_depth",
+                "compute_render",
+                "compute_render_finalize",
+            ],
+        )
         .unwrap();
 
     info!("CUDA PTX Loading took {:.2?} seconds", start.elapsed());
@@ -128,6 +139,12 @@ fn setup_cuda(world: &mut World) {
     let render_texture_buffer = unsafe {
         device
             .alloc::<u8>(4 * RENDER_TEXTURE_SIZE.0 * RENDER_TEXTURE_SIZE.1)
+            .unwrap()
+    };
+
+    let render_data_texture_buffer = unsafe {
+        device
+            .alloc::<RenderDataTextureValue>(RENDER_TEXTURE_SIZE.0 * RENDER_TEXTURE_SIZE.1)
             .unwrap()
     };
 
@@ -148,9 +165,10 @@ fn setup_cuda(world: &mut World) {
     }
 
     world.insert_resource(compression);
-    world.insert_non_send_resource(RenderCudaDevice(device));
+    world.insert_non_send_resource(RenderCudaContext { device });
     world.insert_non_send_resource(RenderCudaBuffers {
         render_texture_buffer,
+        render_data_texture_buffer,
         cm_texture_buffers,
         rt_sphere_buffer,
     });
@@ -160,7 +178,7 @@ fn render(
     compression: Res<RenderConeCompression>,
     time: Res<Time>,
     camera: Query<(&Camera, &Projection, &GlobalTransform), With<RenderCameraTarget>>,
-    render_device: NonSend<RenderCudaDevice>,
+    render_context: NonSend<RenderCudaContext>,
     mut render_buffers: NonSendMut<RenderCudaBuffers>,
     render_target_image: Res<RenderTargetImage>,
     mut images: ResMut<Assets<Image>>,
@@ -191,8 +209,8 @@ fn render(
     //     .htod_copy_into(spheres, &mut render_buffers.rt_sphere_buffer)
     //     .unwrap();
 
-    render_device
-        .0
+    render_context
+        .device
         .dtoh_sync_copy_into(
             &render_buffers.render_texture_buffer,
             image.data.as_mut_slice(),
@@ -223,6 +241,13 @@ fn render(
     unsafe {
         let render_texture = crate::bindings::cuda::Texture {
             texture: std::mem::transmute(*(&render_buffers.render_texture_buffer).device_ptr()),
+            size: [RENDER_TEXTURE_SIZE.0 as _, RENDER_TEXTURE_SIZE.1 as _],
+        };
+
+        let render_data_texture = crate::bindings::cuda::Texture {
+            texture: std::mem::transmute(
+                *(&render_buffers.render_data_texture_buffer).device_ptr(),
+            ),
             size: [RENDER_TEXTURE_SIZE.0 as _, RENDER_TEXTURE_SIZE.1 as _],
         };
 
@@ -259,9 +284,9 @@ fn render(
                     / CUDA_GPU_BLOCK_SIZE as f32)
                     .round() as u32;
 
-                render_device
-                    .0
-                    .get_func("main", "render_depth")
+                render_context
+                    .device
+                    .get_func("main", "compute_compressed_depth")
                     .unwrap()
                     .launch(
                         LaunchConfig {
@@ -271,7 +296,7 @@ fn render(
                         },
                         (
                             i,
-                            render_texture.clone(),
+                            render_data_texture.clone(),
                             cm_textures.clone(),
                             globals.clone(),
                             camera.clone(),
@@ -282,9 +307,35 @@ fn render(
             }
         }
 
-        render_device
-            .0
-            .get_func("main", "render")
+        render_context
+            .device
+            .get_func("main", "compute_render")
+            .unwrap()
+            .launch(
+                LaunchConfig {
+                    block_dim: (CUDA_GPU_BLOCK_SIZE as u32, 1, 1),
+                    grid_dim: (
+                        (RENDER_TEXTURE_SIZE.1 as u32 * RENDER_TEXTURE_SIZE.0 as u32)
+                            / (CUDA_GPU_BLOCK_SIZE as u32),
+                        1,
+                        1,
+                    ),
+                    shared_mem_bytes: 0,
+                },
+                (
+                    render_data_texture.clone(),
+                    cm_textures.clone(),
+                    globals.clone(),
+                    camera.clone(),
+                    sd_runtime_scene.clone(),
+                    compression.enabled,
+                ),
+            )
+            .unwrap();
+
+        render_context
+            .device
+            .get_func("main", "compute_render_finalize")
             .unwrap()
             .launch(
                 LaunchConfig {
@@ -299,11 +350,8 @@ fn render(
                 },
                 (
                     render_texture.clone(),
-                    cm_textures.clone(),
+                    render_data_texture.clone(),
                     globals.clone(),
-                    camera.clone(),
-                    sd_runtime_scene.clone(),
-                    compression.enabled,
                 ),
             )
             .unwrap();

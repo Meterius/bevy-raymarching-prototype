@@ -43,7 +43,7 @@ __device__ auto make_sd_scene(
         float sd = sd_box(p, vec3(-30.0f, 0.0f, 0.0f), vec3(1.0f, 2.0f, 10.0f));
 
         p.x = wrap(p.x, -40.0f, 40.0f);
-        sd = min(sd_mandelbulb(p / 20.0f, globals.time) * 20.0f, sd);
+        sd = min(sd_mandelbulb((p + vec3(0.0f, 0.0f, 15.0f)) / 20.0f, globals.time) * 20.0f, sd);
 
         for (int i = 0; i < runtime_scene.sphere_count; i++) {
             sd = min(
@@ -61,9 +61,9 @@ __device__ auto make_sd_scene(
 #include <cuda_runtime.h>
 
 #ifndef DISABLE_CONE_MARCH
-extern "C" __global__ void render_depth(
+extern "C" __global__ void compute_compressed_depth(
      unsigned int level,
-     Texture render_texture,
+     RenderDataTexture render_data_texture,
      ConeMarchTextures cm_textures,
      GlobalsBuffer globals,
      CameraBuffer camera,
@@ -89,7 +89,7 @@ extern "C" __global__ void render_depth(
     vec2 cam_coord = ndc_to_camera(ndc_coord, { cm_textures.textures[level].size[0], cm_textures.textures[level].size[1] });
     Ray ray { { camera.position[0], camera.position[1], camera.position[2] }, camera_to_ray(cam_coord, camera) };
 
-    float aspect_ratio = (float) render_texture.size[0] / (float) render_texture.size[1];
+    float aspect_ratio = (float) render_data_texture.size[0] / (float) render_data_texture.size[1];
     float fov_fac = tan(camera.fov / 2);
     float cone_radius = length(vec2(
         (2.0f * aspect_ratio * fov_fac) / (float) cm_textures.textures[level].size[0],
@@ -111,7 +111,7 @@ extern "C" __global__ void render_depth(
     RayMarchHit hit = ray_march<true>(make_sd_scene(globals, camera), ray, entry, cone_radius);
 
     if (RELATIVIZE_STEP_COUNT) {
-        float compression_factor = (float) (render_texture.size[0] * render_texture.size[1]) / (float) (cm_textures.textures[level].size[0] * cm_textures.textures[level].size[1]);
+        float compression_factor = (float) (render_data_texture.size[0] * render_data_texture.size[1]) / (float) (cm_textures.textures[level].size[0] * cm_textures.textures[level].size[1]);
         hit.steps = (int) ceil((float) hit.steps / compression_factor);
     }
 
@@ -119,8 +119,8 @@ extern "C" __global__ void render_depth(
 }
 #endif
 
-extern "C" __global__ void render(
-    Texture render_texture,
+extern "C" __global__ void compute_render(
+    RenderDataTexture render_data_texture,
     ConeMarchTextures cm_textures,
     GlobalsBuffer globals,
     CameraBuffer camera,
@@ -137,9 +137,9 @@ extern "C" __global__ void render(
     __syncthreads();
 
     u32 id = blockIdx.x * blockDim.x + threadIdx.x;
-    uvec2 texture_coord = uvec2(id % render_texture.size[0], id / render_texture.size[0]);
-    vec2 ndc_coord = texture_to_ndc(texture_coord, {render_texture.size[0], render_texture.size[1] });
-    vec2 cam_coord = ndc_to_camera(ndc_coord, { render_texture.size[0], render_texture.size[1] });
+    uvec2 texture_coord = uvec2(id % render_data_texture.size[0], id / render_data_texture.size[0]);
+    vec2 ndc_coord = texture_to_ndc(texture_coord, { render_data_texture.size[0], render_data_texture.size[1] });
+    vec2 cam_coord = ndc_to_camera(ndc_coord, { render_data_texture.size[0], render_data_texture.size[1] });
     Ray ray { { camera.position[0], camera.position[1], camera.position[2] }, camera_to_ray(cam_coord, camera) };
 
     #ifndef DISABLE_CONE_MARCH
@@ -160,12 +160,30 @@ extern "C" __global__ void render(
         ConeMarchTextureValue entry = { 0.0f, 0, Collision };
     #endif
 
-    vec3 color = render_ray(make_sd_scene(globals, camera), ray, entry);
-    vec3 mapped_color = clamp(color, 0.0f, 1.0f);
+    RayMarchHit hit = ray_march<false>(make_sd_scene(globals, camera), ray, entry);
 
-    unsigned int rgba = ((unsigned int)(255.0f * mapped_color.x) & 0xff) |
-                        (((unsigned int)(255.0f * mapped_color.y) & 0xff) << 8) |
-                        (((unsigned int)(255.0f * mapped_color.z) & 0xff) << 16) |
+    render_data_texture.texture[id] = {
+            hit.depth, (float) hit.steps, hit.outcome, { 1.0f, 1.0f, 1.0f }, 1.0f
+    };
+}
+
+extern "C" __global__ void compute_render_finalize(
+    Texture render_texture,
+    RenderDataTexture render_data_texture,
+    GlobalsBuffer globals
+) {
+    u32 id = blockIdx.x * blockDim.x + threadIdx.x;
+    uvec2 texture_coord = uvec2(id % render_data_texture.size[0], id / render_data_texture.size[0]);
+
+    vec3 color = clamp(
+            vec3(render_data_texture.texture[id].steps * 0.001f),
+            0.0f, 1.0f
+    );
+
+    unsigned int rgba = ((unsigned int)(255.0f * color.x) & 0xff) |
+                        (((unsigned int)(255.0f * color.y) & 0xff) << 8) |
+                        (((unsigned int)(255.0f * color.z) & 0xff) << 16) |
                         (255 << 24);
+
     render_texture.texture[id] = rgba;
 }
