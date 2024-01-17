@@ -14,7 +14,8 @@ const CUDA_GPU_HARDWARE_MAX_PARALLEL_BLOCK_COUNT: usize = 128;
 
 const CONE_MARCH_LEVELS: usize = 4;
 
-#[derive(Debug, Clone, Resource)]
+#[derive(Debug, Clone, Resource, Reflect)]
+#[reflect(Resource)]
 pub struct RenderConeCompression {
     enabled: bool,
     levels: [usize; CONE_MARCH_LEVELS],
@@ -183,10 +184,12 @@ fn render(
         });
     }
 
-    render_device
-        .0
-        .htod_copy_into(spheres, &mut render_buffers.rt_sphere_buffer)
-        .unwrap();
+    let spheres: [SdSphere; 1024] = spheres.try_into().unwrap();
+
+    // render_device
+    //     .0
+    //     .htod_copy_into(spheres, &mut render_buffers.rt_sphere_buffer)
+    //     .unwrap();
 
     render_device
         .0
@@ -224,8 +227,8 @@ fn render(
         };
 
         let sd_runtime_scene = crate::bindings::cuda::SdRuntimeScene {
-            spheres: std::mem::transmute(*(&render_buffers.rt_sphere_buffer).device_ptr()),
-            sphere_count: 1024,
+            spheres,
+            sphere_count: 0,
         };
 
         let mut cm_textures = vec![];
@@ -300,6 +303,7 @@ fn render(
                     globals.clone(),
                     camera.clone(),
                     sd_runtime_scene.clone(),
+                    compression.enabled,
                 ),
             )
             .unwrap();
@@ -331,8 +335,9 @@ pub struct RayMarcherRenderPlugin {}
 impl Plugin for RayMarcherRenderPlugin {
     fn build(&self, app: &mut App) {
         // Main App Build
-        app.add_systems(Startup, (setup, setup_cuda));
-        app.add_systems(Last, render);
-        app.add_systems(PostUpdate, (synchronize_target_sprite,));
+        app.register_type::<RenderConeCompression>()
+            .add_systems(Startup, (setup, setup_cuda))
+            .add_systems(Last, render)
+            .add_systems(PostUpdate, (synchronize_target_sprite,));
     }
 }

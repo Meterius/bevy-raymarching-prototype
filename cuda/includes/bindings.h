@@ -11,6 +11,7 @@ struct ConeMarchTextureValue {
     float depth;
     int steps;
     enum RayMarchHitOutcome outcome;
+    int padding;
 };
 
 struct ConeMarchTexture {
@@ -44,12 +45,12 @@ struct CameraBuffer {
 
 // CPU
 
-struct SdRuntimeScene {
-    int sphere_count;
-    struct SdSphere* spheres;
-};
-
 struct SdSphere {
     float translation[3];
     float radius;
+};
+
+struct SdRuntimeScene {
+    int sphere_count;
+    struct SdSphere spheres[1024];
 };

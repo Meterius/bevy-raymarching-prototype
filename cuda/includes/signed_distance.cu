@@ -3,8 +3,7 @@
 #include "../includes/libraries/glm/glm.hpp"
 #include "../includes/utils.h"
 
-
-// signed-distance scene
+using namespace glm;
 
 __device__ float wrap(float x, float lower, float higher) {
     return lower + glm::mod(x - lower, higher - lower);
@@ -22,7 +21,7 @@ __device__ vec3 wrap(vec3 p, vec3 lower, vec3 higher) {
 
 #define POWER 8.0f
 
-__device__ float sd_mandelbulb(glm::vec3 p, float time) {
+__device__ float sd_mandelbulb(vec3 p, float time) {
     glm::vec3 z = p;
     float dr = 1.0f;
     float r;
@@ -49,9 +48,18 @@ __device__ float sd_mandelbulb(glm::vec3 p, float time) {
     return 0.5f * log(r) * r / dr;
 }
 
+// primitives
+
+__device__ float sd_box(vec3 p, vec3 bp, vec3 bs) {
+    vec3 q = abs(p - bp) - bs;
+    float udst = length(max(q, vec3(0.0f)));
+    float idst = maximum(min(q, vec3(0.0f)));
+    return udst + idst;
+}
+
 //
 
-__device__ float sd_axes(glm::vec3 p) {
+__device__ float sd_axes(vec3 p) {
     p.x = wrap(p.x, -0.5f, 0.5f);
     p.z = wrap(p.z, -0.5f, 0.5f);
     return length(p) - 0.05;

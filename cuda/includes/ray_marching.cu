@@ -33,33 +33,32 @@ __device__ RayMarchHit ray_march(
 
     if (starting.outcome == DepthLimit) {
         hit.outcome = starting.outcome;
-        return hit;
-    }
+    } else {
+        for (; hit.steps < RAY_MARCH_STEP_LIMIT; hit.steps++) {
+            float d = sd_scene(hit.position);
 
-    for (; hit.steps < RAY_MARCH_STEP_LIMIT; hit.steps++) {
-        float d = sd_scene(hit.position);
+            if (useConeMarch) {
+                if (d < cone_radius * (1.0f + hit.depth)) {
+                    hit.outcome = Collision;
+                    break;
+                }
+            } else {
+                if (d < RAY_MARCH_COLLISION_DISTANCE) {
+                    hit.outcome = Collision;
+                    break;
+                }
+            }
 
-        if (useConeMarch) {
-            if (d < cone_radius * (1.0f + hit.depth)) {
-                hit.outcome = Collision;
+            float diff = d;
+            hit.depth += diff;
+            hit.position.x = glm::fma(diff, ray.direction.x, hit.position.x);
+            hit.position.y = glm::fma(diff, ray.direction.y, hit.position.y);
+            hit.position.z = glm::fma(diff, ray.direction.z, hit.position.z);
+
+            if (hit.depth > RAY_MARCH_DEPTH_LIMIT) {
+                hit.outcome = DepthLimit;
                 break;
             }
-        } else {
-            if (d < RAY_MARCH_COLLISION_DISTANCE) {
-                hit.outcome = Collision;
-                break;
-            }
-        }
-
-        float diff = d;
-        hit.depth += diff;
-        hit.position.x = glm::fma(diff, ray.direction.x, hit.position.x);
-        hit.position.y = glm::fma(diff, ray.direction.y, hit.position.y);
-        hit.position.z = glm::fma(diff, ray.direction.z, hit.position.z);
-
-        if (hit.depth > RAY_MARCH_DEPTH_LIMIT) {
-            hit.outcome = DepthLimit;
-            break;
         }
     }
 

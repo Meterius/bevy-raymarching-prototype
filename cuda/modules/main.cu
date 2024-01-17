@@ -6,6 +6,8 @@
 
 using namespace glm;
 
+#define RELATIVIZE_STEP_COUNT false
+
 // coordinate system conversion
 
 __device__ vec2 texture_to_ndc(uvec2 p, vec2 texture_size) {
@@ -31,13 +33,17 @@ __device__ vec3 camera_to_ray(vec2 p, CameraBuffer CAMERA) {
 
 // scene
 
+__shared__ SdRuntimeScene runtime_scene;
+
 __device__ auto make_sd_scene(
-    GlobalsBuffer& globals,
-    CameraBuffer& camera,
-    SdRuntimeScene& runtime_scene
+    GlobalsBuffer &globals,
+    CameraBuffer &camera
 ) {
-    return [&globals, &runtime_scene](vec3 p){
-        float sd = INFINITY;
+    return [globals](vec3 p){
+        float sd = sd_box(p, vec3(-30.0f, 0.0f, 0.0f), vec3(1.0f, 2.0f, 10.0f));
+
+        p.x = wrap(p.x, -40.0f, 40.0f);
+        sd = min(sd_mandelbulb(p / 20.0f, globals.time) * 20.0f, sd);
 
         for (int i = 0; i < runtime_scene.sphere_count; i++) {
             sd = min(
@@ -52,6 +58,8 @@ __device__ auto make_sd_scene(
 
 // ray-marching
 
+#include <cuda_runtime.h>
+
 #ifndef DISABLE_CONE_MARCH
 extern "C" __global__ void render_depth(
      unsigned int level,
@@ -59,8 +67,17 @@ extern "C" __global__ void render_depth(
      ConeMarchTextures cm_textures,
      GlobalsBuffer globals,
      CameraBuffer camera,
-     SdRuntimeScene runtime_scene
+     SdRuntimeScene runtime_scene_param
 ) {
+    runtime_scene.sphere_count = runtime_scene_param.sphere_count;
+
+    int perThread = runtime_scene.sphere_count / blockDim.x;
+    for (int i = 0; i < perThread; i++) {
+        runtime_scene.spheres[threadIdx.x * perThread + i] = runtime_scene_param.spheres[threadIdx.x * perThread + i];
+    }
+
+    __syncthreads();
+
     u32 id = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (id > cm_textures.textures[level].size[0] * cm_textures.textures[level].size[1]) {
@@ -91,7 +108,13 @@ extern "C" __global__ void render_depth(
         ];
     }
 
-    RayMarchHit hit = ray_march<true>(make_sd_scene(globals, camera, runtime_scene), ray, entry, cone_radius);
+    RayMarchHit hit = ray_march<true>(make_sd_scene(globals, camera), ray, entry, cone_radius);
+
+    if (RELATIVIZE_STEP_COUNT) {
+        float compression_factor = (float) (render_texture.size[0] * render_texture.size[1]) / (float) (cm_textures.textures[level].size[0] * cm_textures.textures[level].size[1]);
+        hit.steps = (int) ceil((float) hit.steps / compression_factor);
+    }
+
     cm_textures.textures[level].texture[id] = ConeMarchTextureValue { hit.depth, hit.steps, hit.outcome };
 }
 #endif
@@ -101,8 +124,18 @@ extern "C" __global__ void render(
     ConeMarchTextures cm_textures,
     GlobalsBuffer globals,
     CameraBuffer camera,
-    SdRuntimeScene runtime_scene
+    SdRuntimeScene runtime_scene_param,
+    bool compression_enabled
 ) {
+    runtime_scene.sphere_count = runtime_scene_param.sphere_count;
+
+    int perThread = runtime_scene.sphere_count / blockDim.x;
+    for (int i = 0; i < perThread; i++) {
+        runtime_scene.spheres[threadIdx.x * perThread + i] = runtime_scene_param.spheres[threadIdx.x * perThread + i];
+    }
+
+    __syncthreads();
+
     u32 id = blockIdx.x * blockDim.x + threadIdx.x;
     uvec2 texture_coord = uvec2(id % render_texture.size[0], id / render_texture.size[0]);
     vec2 ndc_coord = texture_to_ndc(texture_coord, {render_texture.size[0], render_texture.size[1] });
@@ -110,19 +143,24 @@ extern "C" __global__ void render(
     Ray ray { { camera.position[0], camera.position[1], camera.position[2] }, camera_to_ray(cam_coord, camera) };
 
     #ifndef DISABLE_CONE_MARCH
-        uvec2 cm_texture_coord = ndc_to_texture(
-            ndc_coord,
-            { (float) cm_textures.textures[CONE_MARCH_LEVELS - 1].size[0], (float) cm_textures.textures[CONE_MARCH_LEVELS - 1].size[1] }
-        );
+        ConeMarchTextureValue entry = { 0.0f, 0, Collision };
 
-        ConeMarchTextureValue entry = cm_textures.textures[CONE_MARCH_LEVELS - 1].texture[
-            cm_texture_coord.x + cm_textures.textures[CONE_MARCH_LEVELS - 1].size[0] * cm_texture_coord.y
-        ];
+        if (compression_enabled) {
+            uvec2 cm_texture_coord = ndc_to_texture(
+                    ndc_coord,
+                    {(float) cm_textures.textures[CONE_MARCH_LEVELS - 1].size[0],
+                     (float) cm_textures.textures[CONE_MARCH_LEVELS - 1].size[1]}
+            );
+
+            entry = cm_textures.textures[CONE_MARCH_LEVELS - 1].texture[
+                    cm_texture_coord.x + cm_textures.textures[CONE_MARCH_LEVELS - 1].size[0] * cm_texture_coord.y
+            ];
+        }
     #else
         ConeMarchTextureValue entry = { 0.0f, 0, Collision };
     #endif
 
-    vec3 color = render_ray(make_sd_scene(globals, camera, runtime_scene), ray, entry);
+    vec3 color = render_ray(make_sd_scene(globals, camera), ray, entry);
     vec3 mapped_color = clamp(color, 0.0f, 1.0f);
 
     unsigned int rgba = ((unsigned int)(255.0f * mapped_color.x) & 0xff) |
