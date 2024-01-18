@@ -440,6 +440,7 @@ fn render(
                         render_parameters.render_texture.clone(),
                         render_parameters.render_data_texture.clone(),
                         render_parameters.globals.clone(),
+                        compression.enabled,
                     ),
                 )
                 .unwrap()

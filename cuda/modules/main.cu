@@ -7,6 +7,7 @@
 using namespace glm;
 
 #define RELATIVIZE_STEP_COUNT false
+#define COMPRESSION_STEP_INTERPOLATION false
 
 // coordinate system conversion
 
@@ -16,6 +17,39 @@ __device__ vec2 texture_to_ndc(uvec2 p, vec2 texture_size) {
 
 __device__ uvec2 ndc_to_texture(vec2 p, vec2 texture_size) {
     return uvec2(round((p * texture_size) - vec2(0.5f, 0.5f)));
+}
+
+template <typename Func, typename Texture>
+__device__ auto fetch_2d(ivec2 p, Texture &texture, Func map) {
+    return map(
+        texture.texture[
+            min(max(p.x, 0), texture.size[0] - 1)
+            + min(max(p.y, 0), texture.size[1] - 1) * texture.size[0]
+        ]
+    );
+}
+
+__device__ float cubic_interpolate(float y0, float y1, float y2, float y3, float rx1) {
+    return y1 + 0.5f * rx1*(y2 - y0 + rx1*(2.0f*y0 - 5.0f*y1 + 4.0f*y2 - y3 + rx1*(3.0f*(y1 - y2) + y3 - y0)));
+}
+
+template <typename Func, typename Texture>
+__device__ auto ndc_to_interpolated_value(vec2 p, Texture &texture, Func map) {
+    vec2 t = (p * vec2((float) texture.size[0], (float) texture.size[1])) - vec2(0.5f, 0.5f);
+    ivec2 tc = ivec2(floor(t));
+
+    float interps[4];
+    for (int i = 0; i < 4; i++) {
+        interps[i] = cubic_interpolate(
+        fetch_2d(ivec2(tc.x - 1, tc.y + i - 1), texture, map),
+        fetch_2d(ivec2(tc.x, tc.y + i - 1), texture, map),
+        fetch_2d(ivec2(tc.x + 1, tc.y + i - 1), texture, map),
+        fetch_2d(ivec2(tc.x + 2, tc.y + i - 1), texture, map),
+        t.x - (float) tc.x
+        );
+    }
+
+    return cubic_interpolate(interps[0], interps[1], interps[2], interps[3], t.y - (float) tc.y);
 }
 
 __device__ vec2 ndc_to_camera(vec2 p, vec2 render_screen_size) {
@@ -106,6 +140,12 @@ extern "C" __global__ void compute_compressed_depth(
         entry = cm_textures.textures[level - 1].texture[
             lower_cm_texture_coord.x + cm_textures.textures[level - 1].size[0] * lower_cm_texture_coord.y
         ];
+
+        if (COMPRESSION_STEP_INTERPOLATION) {
+            entry.steps = ndc_to_interpolated_value(
+                ndc_coord, cm_textures.textures[level - 1], [](ConeMarchTextureValue entry) { return entry.steps; }
+            );
+        }
     }
 
     RayMarchHit hit = ray_march<true>(make_sd_scene(globals, camera), ray, entry, cone_radius);
@@ -115,7 +155,7 @@ extern "C" __global__ void compute_compressed_depth(
         hit.steps = (int) ceil((float) hit.steps / compression_factor);
     }
 
-    cm_textures.textures[level].texture[id] = ConeMarchTextureValue { hit.depth, hit.steps, hit.outcome };
+    cm_textures.textures[level].texture[id] = ConeMarchTextureValue { hit.depth, (float) hit.steps + entry.steps, hit.outcome };
 }
 #endif
 
@@ -147,37 +187,98 @@ extern "C" __global__ void compute_render(
 
         if (compression_enabled) {
             uvec2 cm_texture_coord = ndc_to_texture(
-                    ndc_coord,
-                    {(float) cm_textures.textures[CONE_MARCH_LEVELS - 1].size[0],
-                     (float) cm_textures.textures[CONE_MARCH_LEVELS - 1].size[1]}
+                ndc_coord,
+                {(float) cm_textures.textures[CONE_MARCH_LEVELS - 1].size[0],
+                 (float) cm_textures.textures[CONE_MARCH_LEVELS - 1].size[1]}
             );
 
             entry = cm_textures.textures[CONE_MARCH_LEVELS - 1].texture[
-                    cm_texture_coord.x + cm_textures.textures[CONE_MARCH_LEVELS - 1].size[0] * cm_texture_coord.y
+                cm_texture_coord.x + cm_textures.textures[CONE_MARCH_LEVELS - 1].size[0] * cm_texture_coord.y
             ];
+
+            if (COMPRESSION_STEP_INTERPOLATION) {
+                entry.steps = ndc_to_interpolated_value(
+                    ndc_coord, cm_textures.textures[CONE_MARCH_LEVELS - 1],
+                    [](ConeMarchTextureValue entry) { return entry.steps; }
+                );
+            }
         }
     #else
+        float interpolated_cm_steps = 0.0f;
         ConeMarchTextureValue entry = { 0.0f, 0, Collision };
     #endif
 
     RayMarchHit hit = ray_march<false>(make_sd_scene(globals, camera), ray, entry);
 
     render_data_texture.texture[id] = {
-            hit.depth, (float) hit.steps, hit.outcome, { 1.0f, 1.0f, 1.0f }, 1.0f
+        hit.depth, (float) hit.steps + entry.steps, hit.outcome, { 1.0f, 1.0f, 1.0f }, 1.0f
     };
+}
+
+#define STEP_GAUSSIAN_SIZE 6
+#define STEP_GAUSSIAN_DEV 12.0f
+
+__device__ float step_gaussian_value(int i, int j) {
+    return exp(
+        -((float) (i * i + j * j) / (2.0f * STEP_GAUSSIAN_DEV * STEP_GAUSSIAN_DEV)))
+        / (2.0f * PI * STEP_GAUSSIAN_DEV * STEP_GAUSSIAN_DEV
+    );
 }
 
 extern "C" __global__ void compute_render_finalize(
     Texture render_texture,
     RenderDataTexture render_data_texture,
-    GlobalsBuffer globals
+    GlobalsBuffer globals,
+    bool compression_enabled
 ) {
     u32 id = blockIdx.x * blockDim.x + threadIdx.x;
-    uvec2 texture_coord = uvec2(id % render_data_texture.size[0], id / render_data_texture.size[0]);
+    ivec2 texture_coord = ivec2(id % render_data_texture.size[0], id / render_data_texture.size[0]);
+
+    float blended_steps = 0.0f;
+
+    if (compression_enabled && false) {
+        float total = 0.0f;
+
+        for (int i = -STEP_GAUSSIAN_SIZE; i <= STEP_GAUSSIAN_SIZE; i++) {
+            for (int j = -STEP_GAUSSIAN_SIZE; j <= STEP_GAUSSIAN_SIZE; j++) {
+                int px = texture_coord.x + i;
+                int py = texture_coord.y + j;
+
+                if (0 <= px && px <= render_texture.size[0] && 0 <= py && py <= render_texture.size[1]) {
+                    float fac;
+
+                    if (
+                        render_data_texture.texture[id].outcome == Collision
+                        && render_data_texture.texture[render_data_texture.size[0] * py + px].outcome == Collision
+                    ) {
+                        fac = clamp(1.0f - 4.0f * abs(
+                                render_data_texture.texture[id].depth -
+                                render_data_texture.texture[render_data_texture.size[0] * py + px].depth
+                        ), 0.0f, 1.0f);
+                    } else if (
+                        render_data_texture.texture[id].outcome == DepthLimit
+                        && render_data_texture.texture[render_data_texture.size[0] * py + px].outcome == DepthLimit
+                    ) {
+                        fac = 1.0f;
+                    } else {
+                        fac = 0.0f;
+                    }
+
+                    float val = step_gaussian_value(i, j) * fac;
+                    total += val;
+                    blended_steps += val * render_data_texture.texture[render_data_texture.size[0] * py + px].steps;
+                }
+            }
+        }
+
+        blended_steps /= total;
+    } else {
+        blended_steps = render_data_texture.texture[id].steps;
+    }
 
     vec3 color = clamp(
-            vec3(render_data_texture.texture[id].steps * 0.001f),
-            0.0f, 1.0f
+        vec3(blended_steps * 0.001f),
+        0.0f, 1.0f
     );
 
     unsigned int rgba = ((unsigned int)(255.0f * color.x) & 0xff) |

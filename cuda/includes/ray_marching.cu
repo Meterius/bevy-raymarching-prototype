@@ -62,6 +62,5 @@ __device__ RayMarchHit ray_march(
         }
     }
 
-    hit.steps += starting.steps;
     return hit;
 }

@@ -23,7 +23,7 @@ struct RenderDataTexture {
 
 struct ConeMarchTextureValue {
     float depth;
-    int steps;
+    float steps;
     enum RayMarchHitOutcome outcome;
     int padding;
 };
