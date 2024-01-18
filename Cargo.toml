@@ -11,6 +11,7 @@ bytemuck = "1.14.0"
 cudarc = "0.10.0"
 naga = "0.14.2"
 naga_oil = "0.11.0"
+nvtx = "1.2.0"
 rand = "0.8.5"
 
 [build-dependencies]

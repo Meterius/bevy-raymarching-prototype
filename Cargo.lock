@@ -411,6 +411,7 @@ dependencies = [
  "cudarc",
  "naga 0.14.2",
  "naga_oil 0.11.0",
+ "nvtx",
  "proc-macro2",
  "quote",
  "rand",
@@ -2912,6 +2913,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.48",
+]
+
+[[package]]
+name = "nvtx"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dfd9a105a93591e01bc67a8c0f86f697a6c09e384f3129aa2bd55823bc431261"
+dependencies = [
+ "cc",
 ]
 
 [[package]]

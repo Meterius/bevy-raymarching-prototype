@@ -12,6 +12,8 @@ pub mod input_handling;
 pub mod renderer;
 
 fn main() {
+    unsafe { cudarc::driver::sys::cuProfilerStart() };
+
     let mut app = App::new();
 
     app.insert_resource(Msaa::Sample8).add_plugins((
