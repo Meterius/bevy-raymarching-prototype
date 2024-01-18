@@ -177,6 +177,32 @@ extern "C" __global__ void compute_compressed_depth(
     }
 
     cm_textures.textures[level].texture[id] = ConeMarchTextureValue { hit.depth, (float) hit.steps + entry.steps, hit.outcome };
+
+    /*
+    __syncthreads();
+
+   if (hit.outcome == Collision) {
+       float total = (float) hit.steps + entry.steps;
+       float value = 1.0f;
+
+       for (int i = -1; i <= 1; i++) {
+           for (int j = -1; j <= 1; j++) {
+               ConeMarchTextureValue item = fetch_2d(
+                   ivec2(cm_texture_coord.x + i, cm_texture_coord.y + j),
+                   cm_textures.textures[level],
+                   [](auto item) { return item; }
+               );
+
+               if (item.outcome != Collision) {
+                   value += item.steps;
+                   total += 1.0f;
+               }
+           }
+       }
+
+       value /= total;
+       cm_textures.textures[level].texture[id].steps = value;
+   */
 }
 #endif
 
@@ -188,6 +214,8 @@ extern "C" __global__ void compute_render(
     SdRuntimeScene runtime_scene_param,
     bool compression_enabled
 ) {
+    // store runtime scene data in shared memory
+
     runtime_scene.sphere_count = runtime_scene_param.sphere_count;
 
     int perThread = runtime_scene.sphere_count / blockDim.x;
@@ -197,6 +225,8 @@ extern "C" __global__ void compute_render(
 
     __syncthreads();
 
+    // calculate ray
+
     u32 id = blockIdx.x * blockDim.x + threadIdx.x;
     uvec2 texture_coord = uvec2(id % render_data_texture.size[0], id / render_data_texture.size[0]);
     vec2 ndc_coord = texture_to_ndc(texture_coord, { render_data_texture.size[0], render_data_texture.size[1] });
@@ -205,6 +235,8 @@ extern "C" __global__ void compute_render(
         { camera.position[0], camera.position[1], camera.position[2] },
         camera_to_ray(cam_coord, camera, from_array(globals.render_screen_size), vec2(globals.render_texture_size[0], globals.render_texture_size[1]))
     };
+
+    // if enabled, fetch cone march compression starting point
 
     #ifndef DISABLE_CONE_MARCH
         ConeMarchTextureValue entry = { 0.0f, 0, Collision };
@@ -232,9 +264,9 @@ extern "C" __global__ void compute_render(
         ConeMarchTextureValue entry = { 0.0f, 0, Collision };
     #endif
 
-    RayMarchHit hit = ray_march<false>(make_sd_scene(globals, camera), ray, entry);
+    // ray march and fill preliminary values in render data texture
 
-    hit.outcome = entry.outcome;
+    RayMarchHit hit = ray_march<false>(make_sd_scene(globals, camera), ray, entry);
 
     render_data_texture.texture[id] = {
         hit.depth, (float) hit.steps + entry.steps, hit.outcome, { 1.0f, 1.0f, 1.0f }, 1.0f
