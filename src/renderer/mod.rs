@@ -1,4 +1,6 @@
-use crate::bindings::cuda::{ConeMarchTextureValue, RenderDataTextureValue, SdSphere};
+use crate::bindings::cuda::{
+    ConeMarchTextureValue, RenderDataTextureValue, SdSphere, CONE_MARCH_LEVELS,
+};
 use bevy::core_pipeline::clear_color::ClearColorConfig;
 use bevy::render::extract_resource::ExtractResource;
 use bevy::window::PrimaryWindow;
@@ -16,8 +18,6 @@ const RENDER_TEXTURE_SIZE: (usize, usize) = (2560, 1440);
 const CUDA_GPU_BLOCK_SIZE: usize = 512;
 const CUDA_GPU_HARDWARE_MAX_PARALLEL_BLOCK_COUNT: usize = 128;
 
-const CONE_MARCH_LEVELS: usize = 4;
-
 #[derive(Debug, Clone, Default, Resource, Reflect)]
 #[reflect(Resource)]
 pub struct RenderSettings {
@@ -28,7 +28,7 @@ pub struct RenderSettings {
 #[reflect(Resource)]
 pub struct RenderConeCompression {
     enabled: bool,
-    levels: [usize; CONE_MARCH_LEVELS],
+    levels: [usize; CONE_MARCH_LEVELS as usize],
 }
 
 impl Default for RenderConeCompression {
@@ -164,7 +164,7 @@ fn setup_cuda(world: &mut World) {
 
     let mut cm_texture_buffers = [vec![], vec![]];
 
-    for i in 0..CONE_MARCH_LEVELS {
+    for i in 0..CONE_MARCH_LEVELS as usize {
         cm_texture_buffers[0].push(unsafe {
             device
                 .alloc::<ConeMarchTextureValue>(

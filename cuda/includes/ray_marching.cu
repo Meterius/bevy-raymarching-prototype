@@ -27,7 +27,7 @@ __device__ RayMarchHit ray_march(
     SdSceneFunc sd_scene,
     Ray ray,
     ConeMarchTextureValue starting = ConeMarchTextureValue {},
-    float cone_radius = 0.0
+    float cone_radius_at_unit = 0.0
 ) {
     RayMarchHit hit { 0, ray.position + ray.direction * starting.depth, starting.depth, StepLimit };
 
@@ -38,7 +38,7 @@ __device__ RayMarchHit ray_march(
             float d = sd_scene(hit.position);
 
             if (useConeMarch) {
-                if (d < cone_radius * (1.0f + hit.depth)) {
+                if (d < cone_radius_at_unit * hit.depth) {
                     hit.outcome = Collision;
                     break;
                 }
@@ -50,7 +50,13 @@ __device__ RayMarchHit ray_march(
             }
 
             float diff = d;
-            hit.depth += diff;
+
+            if (useConeMarch) {
+                hit.depth += diff - cone_radius_at_unit * hit.depth;
+            } else {
+                hit.depth += diff;
+            }
+
             hit.position.x = glm::fma(diff, ray.direction.x, hit.position.x);
             hit.position.y = glm::fma(diff, ray.direction.y, hit.position.y);
             hit.position.z = glm::fma(diff, ray.direction.z, hit.position.z);
