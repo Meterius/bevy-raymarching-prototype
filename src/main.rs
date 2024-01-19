@@ -20,7 +20,7 @@ fn main() {
         DefaultPlugins
             .set(WindowPlugin {
                 primary_window: Some(Window {
-                    position: WindowPosition::Centered(MonitorSelection::Index(1)),
+                    position: WindowPosition::Centered(MonitorSelection::Index(0)),
                     present_mode: PresentMode::AutoVsync,
                     resolution: WindowResolution::new(1920., 1080.),
                     ..default()

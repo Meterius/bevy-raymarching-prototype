@@ -19,7 +19,7 @@ struct __align__(32) Ray {
 };
 
 #define RAY_MARCH_STEP_LIMIT 500
-#define RAY_MARCH_DEPTH_LIMIT 100000.0f
+#define RAY_MARCH_DEPTH_LIMIT 1000.0f
 #define RAY_MARCH_COLLISION_DISTANCE 0.001f
 
 template<bool useConeMarch, typename SdSceneFunc>

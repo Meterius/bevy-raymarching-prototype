@@ -3,6 +3,7 @@
 #include "../includes/ray_marching.cu"
 #include "../includes/rendering.cu"
 #include "../includes/utils.h"
+#include "../includes/color.cu"
 
 using namespace glm;
 
@@ -76,23 +77,54 @@ __device__ vec3 camera_to_ray(
 
 __shared__ SdRuntimeScene runtime_scene;
 
-__device__ auto make_sd_scene(
+__device__ auto make_sds_scene(
     GlobalsBuffer &globals,
     CameraBuffer &camera
 ) {
-    return [globals](vec3 p){
-        float sd = sd_box(p, vec3(-30.0f, 0.0f, 0.0f), vec3(1.0f, 2.0f, 10.0f));
+    auto box_sds = make_generic_sds(
+        [](vec3 p) { return sd_box(p, vec3(-30.0f, 0.0f, 0.0f), vec3(1.0f, 2.0f, 10.0f)); },
+        RenderSurfaceData { vec3(1.0, 0.0, 0.0 )}
+    );
 
-        //p.x = wrap(p.x, -40.0f, 40.0f);
-        //sd = min(sd_mandelbulb((p + vec3(0.0f, 0.0f, 15.0f)) / 20.0f, globals.time) * 20.0f, sd);
+    auto runtime_scene_sds = make_generic_sds(
+        [](vec3 p) {
+            float sd = 3.40282347E+38f;
+            for (int i = 0; i < runtime_scene.sphere_count; i++) {
+                sd = min(
+                    sd,
+                    length(p - from_array(runtime_scene.spheres[i].translation)) - runtime_scene.spheres[i].radius
+                );
+            }
+            return sd;
+        },
+        RenderSurfaceData { vec3(0.0, 0.0, 1.0 )}
+    );
 
-        for (int i = 0; i < runtime_scene.sphere_count; i++) {
-            sd = min(
-                sd,
-                length(p - from_array(runtime_scene.spheres[i].translation)) - runtime_scene.spheres[i].radius
-            );
+    auto plane_scene_sds = make_generic_sds(
+        [](vec3 p) {
+            return sd_box(p, vec3(0.0f, -0.5f, 0.0f), vec3(50.0f, 1.0f, 50.0f));
+        },
+        RenderSurfaceData { vec3(0.3f, 0.4f, 0.2f) }
+    );
+
+    auto axes_scene_sds = make_generic_location_dependent_sds(
+        [](vec3 p) {
+            return sd_axes(p);
+        },
+        [](vec3 p) {
+            vec3 color;
+            color.x = (p.x > 0.25 ? 1.0f : (p.x < 0.25 ? 0.5f : 0.0f));
+            color.y = (p.y > 0.25 ? 1.0f : (p.y < 0.25 ? 0.5f : 0.0f));
+            color.z = (p.z > 0.25 ? 1.0f : (p.z < 0.25 ? 0.5f : 0.0f));
+            return RenderSurfaceData { color };
         }
+    );
 
+    return [=](vec3 p, RenderSurfaceData& surface_output){
+        float sd = box_sds(p, surface_output);
+        sd = min(runtime_scene_sds(p, surface_output), sd);
+        sd = min(plane_scene_sds(p, surface_output), sd);
+        // sd = min(axes_scene_sds(p, surface_output), sd);
         return sd;
     };
 }
@@ -169,7 +201,9 @@ extern "C" __global__ void compute_compressed_depth(
         }
     }
 
-    RayMarchHit hit = ray_march<true>(make_sd_scene(globals, camera), ray, entry, cone_radius_at_unit);
+    auto sds = make_sds_scene(globals, camera);
+    RenderSurfaceData surface {  };
+    RayMarchHit hit = ray_march<true>([&surface, &sds](vec3 p) { return sds(p, surface); }, ray, entry, cone_radius_at_unit);
 
     if (RELATIVIZE_STEP_COUNT) {
         float compression_factor = (float) (render_data_texture.size[0] * render_data_texture.size[1]) / (float) (cm_textures.textures[level].size[0] * cm_textures.textures[level].size[1]);
@@ -266,10 +300,18 @@ extern "C" __global__ void compute_render(
 
     // ray march and fill preliminary values in render data texture
 
-    RayMarchHit hit = ray_march<false>(make_sd_scene(globals, camera), ray, entry);
+
+    auto sds = make_sds_scene(globals, camera);
+    RenderSurfaceData surface {
+        { 0.0f, 0.0f, 0.0f }
+    };
+    RayMarchHit hit = ray_march<false>([&surface, &sds](vec3 p) { return sds(p, surface); }, ray, entry);
+
+    surface = { { 0.0f, 0.0f, 0.0f } };
+    sds(hit.position, surface);
 
     render_data_texture.texture[id] = {
-        hit.depth, (float) hit.steps + entry.steps, hit.outcome, { 1.0f, 1.0f, 1.0f }, 1.0f
+        hit.depth, (float) hit.steps + entry.steps, hit.outcome, { surface.color.x, surface.color.y, surface.color.z }, 0.5f
     };
 }
 
@@ -291,6 +333,7 @@ extern "C" __global__ void compute_render_finalize(
 ) {
     u32 id = blockIdx.x * blockDim.x + threadIdx.x;
     ivec2 texture_coord = ivec2(id % render_data_texture.size[0], id / render_data_texture.size[0]);
+    RenderDataTextureValue texture_value = render_data_texture.texture[id];
 
     float blended_steps = 0.0f;
 
@@ -334,10 +377,17 @@ extern "C" __global__ void compute_render_finalize(
         blended_steps = render_data_texture.texture[id].steps;
     }
 
-    vec3 color = clamp(
-        vec3(blended_steps * 0.001f),
-        0.0f, 1.0f
-    );
+    vec3 color;
+
+    if (texture_value.outcome == Collision) {
+        color = from_array(texture_value.color) * texture_value.light
+                + vec3(texture_value.steps * 0.001f)
+                + vec3(texture_value.depth * 0.01f);
+    } else if (texture_value.outcome == DepthLimit) {
+        color = vec3(1.0f + texture_value.steps * 0.01f);
+    }
+
+    color = min(vec3(1.0), max(vec3(0.0), hdr_map_aces_tone(color)));
 
     unsigned int rgba = ((unsigned int)(255.0f * color.x) & 0xff) |
                         (((unsigned int)(255.0f * color.y) & 0xff) << 8) |

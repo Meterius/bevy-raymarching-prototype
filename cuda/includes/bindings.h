@@ -59,6 +59,15 @@ struct CameraBuffer {
 
 // CPU
 
+struct PointLight {
+    float position[3];
+    float intensity;
+};
+
+struct SunLight {
+    float direction[3];
+};
+
 struct SdSphere {
     float translation[3];
     float radius;

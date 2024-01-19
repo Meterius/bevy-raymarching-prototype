@@ -3,11 +3,24 @@
 #include "./bindings.h"
 #include "./ray_marching.cu"
 
-template<typename SdSceneFunc>
-__device__ RenderDataTextureValue render_ray(SdSceneFunc sd_scene, Ray ray, ConeMarchTextureValue starting) {
-    RayMarchHit hit = ray_march<false>(sd_scene, ray, starting);
+struct RenderSurfaceData {
+    vec3 color;
+};
 
-    return {
-        hit.depth, (float) hit.steps, hit.outcome, { 1.0f, 1.0f, 1.0f }, 1.0f
+struct RayRender {
+    RayMarchHit hit;
+    vec3 color;
+    float light;
+};
+
+template<typename SdsFunc>
+__device__ RayRender render_ray(Ray ray, SdsFunc sds_func) {
+    RenderSurfaceData surface {
+            { 0.0f, 0.0f, 0.0f }
     };
+    RayMarchHit hit = ray_march<false>(sds_func, ray);
+
+    surface = { { 0.0f, 0.0f, 0.0f } };
+    sds_func(hit.position, surface);
 }
+
