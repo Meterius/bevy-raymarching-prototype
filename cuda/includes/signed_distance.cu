@@ -13,8 +13,8 @@ __device__ float wrap(float x, float lower, float higher) {
 }
 
 __device__ vec3 wrap(vec3 p, vec3 lower, vec3 higher) {
-    return {wrap(p.x, lower.x, higher.x), wrap(p.y, lower.y, higher.y),
-            wrap(p.z, lower.z, higher.z)};
+    return { wrap(p.x, lower.x, higher.x), wrap(p.y, lower.y, higher.y),
+             wrap(p.z, lower.z, higher.z) };
 }
 
 // fractals
@@ -72,7 +72,7 @@ __device__ float sd_axes(vec3 p) {
 
 // surface
 
-template <typename SFunc>
+template<typename SFunc>
 __device__ auto make_generic_sds(SFunc sd_func, RenderSurfaceData surface) {
     return [=](vec3 p, RenderSurfaceData &surface_output) {
         float sd = sd_func(p);
@@ -83,7 +83,7 @@ __device__ auto make_generic_sds(SFunc sd_func, RenderSurfaceData surface) {
     };
 }
 
-template <typename SFunc, typename SurfFunc>
+template<typename SFunc, typename SurfFunc>
 __device__ auto make_generic_location_dependent_sds(SFunc sd_func,
                                                     SurfFunc surface_func) {
     return [surface_func, sd_func](vec3 p, RenderSurfaceData &surface_output) {
@@ -97,7 +97,8 @@ __device__ auto make_generic_location_dependent_sds(SFunc sd_func,
 
 #define NORMAL_EPSILON 0.01f
 
-template <typename SFunc> __device__ vec3 sd_normal(vec3 p, SFunc sd_func) {
+template<typename SFunc>
+__device__ vec3 sd_normal(vec3 p, SFunc sd_func) {
     float dx = (-sd_func(vec3(p.x + 2.0 * NORMAL_EPSILON, p.y, p.z)) +
                 8.0 * sd_func(vec3(p.x + NORMAL_EPSILON, p.y, p.z)) -
                 8.0 * sd_func(vec3(p.x - NORMAL_EPSILON, p.y, p.z)) +

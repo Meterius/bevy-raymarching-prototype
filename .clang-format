@@ -1,1 +1,5 @@
 IndentWidth: 4
+AlignAfterOpenBracket: BlockIndent
+BinPackParameters: false
+BinPackArguments: false
+SpaceBeforeCpp11BracedList: true

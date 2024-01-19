@@ -1,8 +1,8 @@
 #pragma once
 
+#include "../includes/bindings.h"
 #include "../includes/libraries/glm/glm.hpp"
 #include "./signed_distance.cu"
-#include "../includes/bindings.h"
 
 using namespace glm;
 
@@ -29,7 +29,12 @@ __device__ RayMarchHit ray_march(
     ConeMarchTextureValue starting = ConeMarchTextureValue {},
     float cone_radius_at_unit = 0.0
 ) {
-    RayMarchHit hit { 0, ray.position + ray.direction * starting.depth, starting.depth, StepLimit };
+    RayMarchHit hit {
+        0,
+        ray.position + ray.direction * starting.depth,
+        starting.depth,
+        StepLimit
+    };
 
     if (starting.outcome == DepthLimit) {
         hit.outcome = starting.outcome;

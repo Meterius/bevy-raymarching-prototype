@@ -17,7 +17,7 @@ struct RenderDataTextureValue {
 };
 
 struct RenderDataTexture {
-    struct RenderDataTextureValue* texture;
+    struct RenderDataTextureValue *texture;
     unsigned int size[2];
 };
 
@@ -29,7 +29,7 @@ struct ConeMarchTextureValue {
 };
 
 struct ConeMarchTexture {
-    struct ConeMarchTextureValue* texture;
+    struct ConeMarchTextureValue *texture;
     unsigned int size[2];
 };
 
@@ -38,7 +38,7 @@ struct ConeMarchTextures {
 };
 
 struct Texture {
-    unsigned int* texture;
+    unsigned int *texture;
     unsigned int size[2];
 };
 
