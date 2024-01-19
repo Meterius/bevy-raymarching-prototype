@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../includes/libraries/glm/glm.hpp"
-#include "../includes/rendering.cu"
+#include "../includes/types.cu"
 #include "../includes/utils.h"
 
 using namespace glm;

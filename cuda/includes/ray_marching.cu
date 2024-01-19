@@ -1,22 +1,10 @@
 #pragma once
 
-#include "../includes/bindings.h"
 #include "../includes/libraries/glm/glm.hpp"
-#include "./signed_distance.cu"
+#include "../includes/bindings.h"
+#include "../includes/types.cu"
 
 using namespace glm;
-
-struct __align__(32) RayMarchHit {
-    int steps;
-    vec3 position;
-    float depth;
-    RayMarchHitOutcome outcome;
-};
-
-struct __align__(32) Ray {
-    vec3 position;
-    vec3 direction;
-};
 
 #define RAY_MARCH_STEP_LIMIT 500
 #define RAY_MARCH_DEPTH_LIMIT 1000.0f

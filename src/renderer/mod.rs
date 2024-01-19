@@ -1,5 +1,6 @@
+use crate::bindings::cuda::MAX_SUN_LIGHT_COUNT;
 use crate::bindings::cuda::{
-    ConeMarchTextureValue, RenderDataTextureValue, SdSphere, CONE_MARCH_LEVELS,
+    ConeMarchTextureValue, RenderDataTextureValue, SdSphere, CONE_MARCH_LEVELS, MAX_SPHERE_COUNT,
 };
 use bevy::core_pipeline::clear_color::ClearColorConfig;
 use bevy::render::extract_resource::ExtractResource;
@@ -277,9 +278,9 @@ fn render(
         },
     };
 
-    let mut spheres = Vec::with_capacity(1024);
+    let mut spheres = Vec::with_capacity(MAX_SPHERE_COUNT as usize);
 
-    for i in 0..1024 {
+    for i in 0..MAX_SPHERE_COUNT as usize {
         spheres.push(SdSphere {
             translation: [
                 i as f32 * 0.7,
@@ -290,11 +291,21 @@ fn render(
         });
     }
 
-    let spheres: [SdSphere; 1024] = spheres.try_into().unwrap();
+    let mut sun_lights = Vec::with_capacity(MAX_SUN_LIGHT_COUNT as usize);
+
+    for i in 0..MAX_SUN_LIGHT_COUNT as usize {
+        sun_lights.push(crate::bindings::cuda::SunLight {
+            direction: Vec3::new(1.0, -1.0, 0.2).normalize().into(),
+        });
+    }
 
     let sd_runtime_scene = crate::bindings::cuda::SdRuntimeScene {
-        spheres,
-        sphere_count: 1024,
+        spheres: spheres.try_into().unwrap(),
+        sphere_count: 0, // MAX_SPHERE_COUNT as i32,
+        lighting: crate::bindings::cuda::SdRuntimeSceneLighting {
+            sun_light_count: 1,
+            sun_lights: sun_lights.try_into().unwrap(),
+        },
     };
 
     let render_texture = crate::bindings::cuda::Texture {

@@ -1,6 +1,9 @@
 #pragma once
 
 #define CONE_MARCH_LEVELS 4
+#define MAX_SUN_LIGHT_COUNT 10
+#define MAX_POINT_LIGHT_COUNT 10
+#define MAX_SPHERE_COUNT 1024
 // #define DISABLE_CONE_MARCH
 
 enum RayMarchHitOutcome {
@@ -73,7 +76,14 @@ struct SdSphere {
     float radius;
 };
 
+struct SdRuntimeSceneLighting {
+    int sun_light_count;
+    struct SunLight sun_lights[MAX_SUN_LIGHT_COUNT];
+};
+
 struct SdRuntimeScene {
     int sphere_count;
-    struct SdSphere spheres[1024];
+    struct SdSphere spheres[MAX_SPHERE_COUNT];
+
+    struct SdRuntimeSceneLighting lighting;
 };

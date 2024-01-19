@@ -1,9 +1,10 @@
+#include "../includes/libraries/glm/glm.hpp"
 #include "../includes/bindings.h"
 #include "../includes/color.cu"
-#include "../includes/libraries/glm/glm.hpp"
-#include "../includes/ray_marching.cu"
-#include "../includes/rendering.cu"
 #include "../includes/utils.h"
+#include "../includes/signed_distance.cu"
+#include "../includes/rendering.cu"
+#include "../includes/ray_marching.cu"
 
 using namespace glm;
 
@@ -86,7 +87,7 @@ __shared__ SdRuntimeScene runtime_scene;
 __device__ auto make_sds_scene(GlobalsBuffer &globals, CameraBuffer &camera) {
     auto box_sds = make_generic_sds(
         [](vec3 p) {
-            return sd_box(p, vec3(-30.0f, 0.0f, 0.0f), vec3(1.0f, 2.0f, 10.0f));
+            return sd_box(p, vec3(-15.0f, 1.0f, 0.0f), vec3(1.0f, 2.0f, 10.0f));
         },
         RenderSurfaceData { vec3(1.0, 0.0, 0.0) }
     );
@@ -321,6 +322,8 @@ extern "C" __global__ void compute_render(
             runtime_scene_param.spheres[threadIdx.x * perThread + i];
     }
 
+    runtime_scene.lighting = runtime_scene_param.lighting;
+
     __syncthreads();
 
     // calculate ray
@@ -379,20 +382,18 @@ extern "C" __global__ void compute_render(
     // ray march and fill preliminary values in render data texture
 
     auto sds = make_sds_scene(globals, camera);
-    RenderSurfaceData surface {{ 0.0f, 0.0f, 0.0f }};
-    RayMarchHit hit = ray_march<false>(
-        [&surface, &sds](vec3 p) { return sds(p, surface); }, ray, entry
+    RayRender ray_render = render_ray(
+        ray,
+        sds,
+        runtime_scene.lighting
     );
 
-    surface = {{ 0.0f, 0.0f, 0.0f }};
-    sds(hit.position, surface);
-
     render_data_texture.texture[id] = {
-        hit.depth,
-        (float) hit.steps + entry.steps,
-        hit.outcome,
-        { surface.color.x, surface.color.y, surface.color.z },
-        0.5f
+        ray_render.hit.depth,
+        (float) ray_render.hit.steps + entry.steps,
+        ray_render.hit.outcome,
+        { ray_render.color.x, ray_render.color.y, ray_render.color.z },
+        ray_render.light
     };
 }
 
@@ -481,11 +482,10 @@ extern "C" __global__ void compute_render_finalize(
     vec3 color;
 
     if (texture_value.outcome == Collision) {
-        color = from_array(texture_value.color) * texture_value.light +
-                vec3(texture_value.steps * 0.001f) +
-                vec3(texture_value.depth * 0.01f);
+        color = from_array(texture_value.color) * texture_value.light * 2.0f +
+                vec3(texture_value.depth * 0.0001f);
     } else if (texture_value.outcome == DepthLimit) {
-        color = vec3(1.0f + texture_value.steps * 0.01f);
+        color = vec3(vec3(0.2f, 0.4f, 1.0f) * 3.0f + texture_value.steps * 0.01f);
     }
 
     color = min(vec3(1.0), max(vec3(0.0), hdr_map_aces_tone(color)));
