@@ -23,9 +23,11 @@ __device__ uvec2 ndc_to_texture(vec2 p, vec2 texture_size) {
 
 template<typename Func, typename Texture>
 __device__ auto fetch_2d(ivec2 p, Texture &texture, Func map) {
-    return map(texture.texture
-               [min(max(p.x, 0), texture.size[0] - 1) +
-                min(max(p.y, 0), texture.size[1] - 1) * texture.size[0]]);
+    return map(
+        texture.texture
+        [min(max(p.x, 0), texture.size[0] - 1) +
+         min(max(p.y, 0), texture.size[1] - 1) * texture.size[0]]
+    );
 }
 
 template<typename Texture>
@@ -103,10 +105,12 @@ __device__ auto make_sds_scene(GlobalsBuffer &globals, CameraBuffer &camera) {
             float sd = 3.40282347E+38f;
             for (int i = 0; i < runtime_scene.sphere_count; i++) {
                 sd =
-                    min(sd,
+                    min(
+                        sd,
                         length(
                             p - from_array(runtime_scene.spheres[i].translation)
-                        ) - runtime_scene.spheres[i].radius);
+                        ) - runtime_scene.spheres[i].radius
+                    );
             }
             return sd;
         },
@@ -163,17 +167,22 @@ __device__ float get_pixel_cone_radius(
     Texture &texture,
     GlobalsBuffer &globals
 ) {
-    const auto texture_to_dir = [&camera, &texture, &globals](vec2 p
+    const auto texture_to_dir = [&camera, &texture, &globals](
+        vec2 p
     ) {
         vec2 ndc_coord = texture_to_ndc(
             p,
-            { texture.size[0],
-              texture.size[1] }
+            {
+                texture.size[0],
+                texture.size[1]
+            }
         );
         vec2 cam_coord = ndc_to_camera(
             ndc_coord,
-            { texture.size[0],
-              texture.size[1] }
+            {
+                texture.size[0],
+                texture.size[1]
+            }
         );
         return camera_to_ray(
             cam_coord,
@@ -185,13 +194,17 @@ __device__ float get_pixel_cone_radius(
 
     vec2 ndc_coord = texture_to_ndc(
         texture_coord,
-        { texture.size[0],
-          texture.size[1] }
+        {
+            texture.size[0],
+            texture.size[1]
+        }
     );
     vec2 cam_coord = ndc_to_camera(
         ndc_coord,
-        { texture.size[0],
-          texture.size[1] }
+        {
+            texture.size[0],
+            texture.size[1]
+        }
     );
     Ray ray {
         { camera.position[0], camera.position[1], camera.position[2] },
@@ -205,27 +218,38 @@ __device__ float get_pixel_cone_radius(
 
     vec3 border_dirs[4] = {
         texture_to_dir(
-            { (float) texture_coord.x - SQRT_INV,
-              (float) texture_coord.y - SQRT_INV }
+            {
+                (float) texture_coord.x - SQRT_INV,
+                (float) texture_coord.y - SQRT_INV
+            }
         ),
         texture_to_dir(
-            { (float) texture_coord.x - SQRT_INV,
-              (float) texture_coord.y + SQRT_INV }
+            {
+                (float) texture_coord.x - SQRT_INV,
+                (float) texture_coord.y + SQRT_INV
+            }
         ),
         texture_to_dir(
-            { (float) texture_coord.x + SQRT_INV,
-              (float) texture_coord.y - SQRT_INV }
+            {
+                (float) texture_coord.x + SQRT_INV,
+                (float) texture_coord.y - SQRT_INV
+            }
         ),
         texture_to_dir(
-            { (float) texture_coord.x + SQRT_INV,
-              (float) texture_coord.y + SQRT_INV }
+            {
+                (float) texture_coord.x + SQRT_INV,
+                (float) texture_coord.y + SQRT_INV
+            }
         ),
     };
 
-    return max(max(length(ray.direction - border_dirs[0]),
-                   length(ray.direction - border_dirs[1])),
-               max(length(ray.direction - border_dirs[2]),
-                   length(ray.direction - border_dirs[3])));
+    return max(
+        max(
+            length(ray.direction - border_dirs[0]),
+            length(ray.direction - border_dirs[1])),
+        max(
+            length(ray.direction - border_dirs[2]),
+            length(ray.direction - border_dirs[3])));
 }
 
 #ifndef DISABLE_CONE_MARCH
@@ -254,17 +278,22 @@ extern "C" __global__ void compute_compressed_depth(
         return;
     }
 
-    const auto texture_to_dir = [&camera, &cm_textures, &level, &globals](vec2 p
+    const auto texture_to_dir = [&camera, &cm_textures, &level, &globals](
+        vec2 p
     ) {
         vec2 ndc_coord = texture_to_ndc(
             p,
-            { cm_textures.textures[level].size[0],
-              cm_textures.textures[level].size[1] }
+            {
+                cm_textures.textures[level].size[0],
+                cm_textures.textures[level].size[1]
+            }
         );
         vec2 cam_coord = ndc_to_camera(
             ndc_coord,
-            { cm_textures.textures[level].size[0],
-              cm_textures.textures[level].size[1] }
+            {
+                cm_textures.textures[level].size[0],
+                cm_textures.textures[level].size[1]
+            }
         );
         return camera_to_ray(
             cam_coord,
@@ -280,13 +309,17 @@ extern "C" __global__ void compute_compressed_depth(
     );
     vec2 ndc_coord = texture_to_ndc(
         cm_texture_coord,
-        { cm_textures.textures[level].size[0],
-          cm_textures.textures[level].size[1] }
+        {
+            cm_textures.textures[level].size[0],
+            cm_textures.textures[level].size[1]
+        }
     );
     vec2 cam_coord = ndc_to_camera(
         ndc_coord,
-        { cm_textures.textures[level].size[0],
-          cm_textures.textures[level].size[1] }
+        {
+            cm_textures.textures[level].size[0],
+            cm_textures.textures[level].size[1]
+        }
     );
     Ray ray {
         { camera.position[0], camera.position[1], camera.position[2] },
@@ -300,32 +333,44 @@ extern "C" __global__ void compute_compressed_depth(
 
     vec3 border_dirs[4] = {
         texture_to_dir(
-            { (float) cm_texture_coord[0] - SQRT_INV,
-              (float) cm_texture_coord[1] - SQRT_INV }
+            {
+                (float) cm_texture_coord[0] - SQRT_INV,
+                (float) cm_texture_coord[1] - SQRT_INV
+            }
         ),
         texture_to_dir(
-            { (float) cm_texture_coord[0] - SQRT_INV,
-              (float) cm_texture_coord[1] + SQRT_INV }
+            {
+                (float) cm_texture_coord[0] - SQRT_INV,
+                (float) cm_texture_coord[1] + SQRT_INV
+            }
         ),
         texture_to_dir(
-            { (float) cm_texture_coord[0] + SQRT_INV,
-              (float) cm_texture_coord[1] - SQRT_INV }
+            {
+                (float) cm_texture_coord[0] + SQRT_INV,
+                (float) cm_texture_coord[1] - SQRT_INV
+            }
         ),
         texture_to_dir(
-            { (float) cm_texture_coord[0] + SQRT_INV,
-              (float) cm_texture_coord[1] + SQRT_INV }
+            {
+                (float) cm_texture_coord[0] + SQRT_INV,
+                (float) cm_texture_coord[1] + SQRT_INV
+            }
         ),
     };
 
-    float cone_radius_at_unit = get_pixel_cone_radius(cm_texture_coord, camera, cm_textures.textures[level],
-                                                      globals);
+    float cone_radius_at_unit = get_pixel_cone_radius(
+        cm_texture_coord, camera, cm_textures.textures[level],
+        globals
+    );
 
     ConeMarchTextureValue entry { 0.0f, 0, Collision };
     if (level > 0) {
         uvec2 lower_cm_texture_coord = ndc_to_texture(
             ndc_coord,
-            { (float) cm_textures.textures[level - 1].size[0],
-              (float) cm_textures.textures[level - 1].size[1] }
+            {
+                (float) cm_textures.textures[level - 1].size[0],
+                (float) cm_textures.textures[level - 1].size[1]
+            }
         );
 
         entry = cm_textures.textures[level - 1].texture
@@ -463,8 +508,10 @@ extern "C" __global__ void compute_render(
     if (compression_enabled) {
         uvec2 cm_texture_coord = ndc_to_texture(
             ndc_coord,
-            { (float) cm_textures.textures[CONE_MARCH_LEVELS - 1].size[0],
-              (float) cm_textures.textures[CONE_MARCH_LEVELS - 1].size[1] }
+            {
+                (float) cm_textures.textures[CONE_MARCH_LEVELS - 1].size[0],
+                (float) cm_textures.textures[CONE_MARCH_LEVELS - 1].size[1]
+            }
         );
 
         entry = cm_textures.textures[CONE_MARCH_LEVELS - 1].texture
@@ -548,13 +595,15 @@ extern "C" __global__ void compute_render_finalize(
                         fac = clamp(
                             1.0f -
                             4.0f *
-                            abs(render_data_texture.texture[id].depth -
+                                abs(
+                                    render_data_texture.texture[id].depth -
                                 render_data_texture
                                     .texture
                                 [render_data_texture.size[0] *
                                  py +
                                  px]
-                                    .depth),
+                                    .depth
+                                ),
                             0.0f,
                             1.0f
                         );

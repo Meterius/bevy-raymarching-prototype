@@ -13,8 +13,10 @@ __device__ float wrap(float x, float lower, float higher) {
 }
 
 __device__ vec3 wrap(vec3 p, vec3 lower, vec3 higher) {
-    return { wrap(p.x, lower.x, higher.x), wrap(p.y, lower.y, higher.y),
-             wrap(p.z, lower.z, higher.z) };
+    return {
+        wrap(p.x, lower.x, higher.x), wrap(p.y, lower.y, higher.y),
+        wrap(p.z, lower.z, higher.z)
+    };
 }
 
 // fractals
@@ -84,8 +86,10 @@ __device__ auto make_generic_sds(SFunc sd_func, RenderSurfaceData surface) {
 }
 
 template<typename SFunc, typename SurfFunc>
-__device__ auto make_generic_location_dependent_sds(SFunc sd_func,
-                                                    SurfFunc surface_func) {
+__device__ auto make_generic_location_dependent_sds(
+    SFunc sd_func,
+    SurfFunc surface_func
+) {
     return [surface_func, sd_func](vec3 p, RenderSurfaceData &surface_output) {
         float sd = sd_func(p);
         if (sd <= SURFACE_DISTANCE) {
