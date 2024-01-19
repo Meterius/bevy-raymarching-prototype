@@ -18,13 +18,13 @@ __device__ RayMarchHit ray_march(
     float cone_radius_at_unit = 0.0
 ) {
     RayMarchHit hit {
-        0,
+        (int) starting.steps,
         ray.position + ray.direction * starting.depth,
         starting.depth,
         StepLimit
     };
 
-    if (starting.outcome == DepthLimit) {
+    if (false && starting.outcome == DepthLimit) {
         hit.outcome = starting.outcome;
     } else {
         for (; hit.steps < RAY_MARCH_STEP_LIMIT; hit.steps++) {
@@ -61,5 +61,38 @@ __device__ RayMarchHit ray_march(
         }
     }
 
+    hit.steps -= (int) starting.steps;
+
     return hit;
+}
+
+template<typename SdSceneFunc>
+__device__ float soft_shadow_ray_march(
+    SdSceneFunc sd_scene,
+    Ray ray,
+    float w
+) {
+    float res = 1.0f;
+    float ph = 1e20f;
+    float depth = 0.0f;
+
+    for (int i = 0; i < RAY_MARCH_STEP_LIMIT; i++) {
+        float sd = sd_scene(ray.position + ray.direction * depth);
+
+        if (sd <= RAY_MARCH_COLLISION_DISTANCE) {
+            return 0.0;
+        }
+
+        float y = sd * sd / (2.0 * ph);
+        float d = sqrt(sd * sd - y * y);
+        res = min(res, d / (w * max(0.0, depth - y)));
+        ph = sd;
+        depth += sd;
+
+        if (depth > RAY_MARCH_DEPTH_LIMIT) {
+            break;
+        }
+    }
+
+    return res;
 }

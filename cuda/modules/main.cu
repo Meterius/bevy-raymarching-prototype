@@ -28,6 +28,12 @@ __device__ auto fetch_2d(ivec2 p, Texture &texture, Func map) {
                 min(max(p.y, 0), texture.size[1] - 1) * texture.size[0]]);
 }
 
+template<typename Texture>
+__device__ auto index_2d(ivec2 p, Texture &texture) {
+    return min(max(p.x, 0), texture.size[0] - 1) + min(max(p.y, 0), texture.size[1] - 1) * texture.size[0];
+}
+
+
 __device__ float
 cubic_interpolate(float y0, float y1, float y2, float y3, float rx1) {
     return y1 + 0.5f * rx1 *
@@ -125,10 +131,22 @@ __device__ auto make_sds_scene(GlobalsBuffer &globals, CameraBuffer &camera) {
         }
     );
 
+    auto mandelbulb_scene_sds = make_generic_sds(
+        [&](vec3 p) {
+            const float scale = 100.0f;
+            p /= scale;
+            p.z = wrap(p.z, -1.0f, 1.0f);
+            p.x -= 1.0f;
+            return sd_mandelbulb(p, globals.time) * scale;
+        },
+        RenderSurfaceData { vec3(1.5f, 0.1f, 1.9f) }
+    );
+
     return [=](vec3 p, RenderSurfaceData &surface_output) {
         float sd = box_sds(p, surface_output);
         sd = min(runtime_scene_sds(p, surface_output), sd);
-        sd = min(plane_scene_sds(p, surface_output), sd);
+        //sd = min(plane_scene_sds(p, surface_output), sd);
+        sd = min(mandelbulb_scene_sds(p, surface_output), sd);
         // sd = min(axes_scene_sds(p, surface_output), sd);
         return sd;
     };
@@ -137,6 +155,78 @@ __device__ auto make_sds_scene(GlobalsBuffer &globals, CameraBuffer &camera) {
 // ray-marching
 
 #include <cuda_runtime.h>
+
+template<typename Texture>
+__device__ float get_pixel_cone_radius(
+    uvec2 texture_coord,
+    CameraBuffer &camera,
+    Texture &texture,
+    GlobalsBuffer &globals
+) {
+    const auto texture_to_dir = [&camera, &texture, &globals](vec2 p
+    ) {
+        vec2 ndc_coord = texture_to_ndc(
+            p,
+            { texture.size[0],
+              texture.size[1] }
+        );
+        vec2 cam_coord = ndc_to_camera(
+            ndc_coord,
+            { texture.size[0],
+              texture.size[1] }
+        );
+        return camera_to_ray(
+            cam_coord,
+            camera,
+            from_array(globals.render_screen_size),
+            vec2(globals.render_texture_size[0], globals.render_texture_size[1])
+        );
+    };
+
+    vec2 ndc_coord = texture_to_ndc(
+        texture_coord,
+        { texture.size[0],
+          texture.size[1] }
+    );
+    vec2 cam_coord = ndc_to_camera(
+        ndc_coord,
+        { texture.size[0],
+          texture.size[1] }
+    );
+    Ray ray {
+        { camera.position[0], camera.position[1], camera.position[2] },
+        camera_to_ray(
+            cam_coord,
+            camera,
+            from_array(globals.render_screen_size),
+            vec2(globals.render_texture_size[0], globals.render_texture_size[1])
+        )
+    };
+
+    vec3 border_dirs[4] = {
+        texture_to_dir(
+            { (float) texture_coord.x - SQRT_INV,
+              (float) texture_coord.y - SQRT_INV }
+        ),
+        texture_to_dir(
+            { (float) texture_coord.x - SQRT_INV,
+              (float) texture_coord.y + SQRT_INV }
+        ),
+        texture_to_dir(
+            { (float) texture_coord.x + SQRT_INV,
+              (float) texture_coord.y - SQRT_INV }
+        ),
+        texture_to_dir(
+            { (float) texture_coord.x + SQRT_INV,
+              (float) texture_coord.y + SQRT_INV }
+        ),
+    };
+
+    return max(max(length(ray.direction - border_dirs[0]),
+                   length(ray.direction - border_dirs[1])),
+               max(length(ray.direction - border_dirs[2]),
+                   length(ray.direction - border_dirs[3])));
+}
 
 #ifndef DISABLE_CONE_MARCH
 extern "C" __global__ void compute_compressed_depth(
@@ -227,11 +317,8 @@ extern "C" __global__ void compute_compressed_depth(
         ),
     };
 
-    float cone_radius_at_unit =
-        max(max(length(ray.direction - border_dirs[0]),
-                length(ray.direction - border_dirs[1])),
-            max(length(ray.direction - border_dirs[2]),
-                length(ray.direction - border_dirs[3])));
+    float cone_radius_at_unit = get_pixel_cone_radius(cm_texture_coord, camera, cm_textures.textures[level],
+                                                      globals);
 
     ConeMarchTextureValue entry { 0.0f, 0, Collision };
     if (level > 0) {
@@ -329,9 +416,28 @@ extern "C" __global__ void compute_render(
     // calculate ray
 
     u32 id = blockIdx.x * blockDim.x + threadIdx.x;
-    uvec2 texture_coord = uvec2(
-        id % render_data_texture.size[0], id / render_data_texture.size[0]
-    );
+
+    uvec2 texture_coord;
+    if (compression_enabled && CONE_MARCH_LEVELS != 0) {
+        int cm_block_w = render_data_texture.size[0] / cm_textures.textures[CONE_MARCH_LEVELS - 1].size[0];
+        int cm_block_h = render_data_texture.size[1] / cm_textures.textures[CONE_MARCH_LEVELS - 1].size[1];
+        int cm_block_size = cm_block_w * cm_block_h;
+
+        int cm_block_count_x = cm_textures.textures[CONE_MARCH_LEVELS - 1].size[0];
+
+        int cm_block_idx = id / cm_block_size;
+        int cm_item_idx = id % cm_block_size;
+
+        texture_coord.x = cm_item_idx % cm_block_w + cm_block_w * (cm_block_idx % cm_block_count_x);
+        texture_coord.y = cm_item_idx / cm_block_w + cm_block_h * (cm_block_idx / cm_block_count_x);
+    } else {
+        texture_coord = uvec2(
+            id % render_data_texture.size[0], id / render_data_texture.size[0]
+        );
+    }
+
+    u32 texture_index = index_2d(texture_coord, render_data_texture);
+
     vec2 ndc_coord = texture_to_ndc(
         texture_coord,
         { render_data_texture.size[0], render_data_texture.size[1] }
@@ -385,10 +491,11 @@ extern "C" __global__ void compute_render(
     RayRender ray_render = render_ray(
         ray,
         sds,
-        runtime_scene.lighting
+        runtime_scene.lighting,
+        entry
     );
 
-    render_data_texture.texture[id] = {
+    render_data_texture.texture[texture_index] = {
         ray_render.hit.depth,
         (float) ray_render.hit.steps + entry.steps,
         ray_render.hit.outcome,
@@ -482,13 +589,14 @@ extern "C" __global__ void compute_render_finalize(
     vec3 color;
 
     if (texture_value.outcome == Collision) {
-        color = from_array(texture_value.color) * texture_value.light * 2.0f +
+        color = from_array(texture_value.color) * texture_value.light * (2.0f + vec3(texture_value.steps * 0.01f)) +
                 vec3(texture_value.depth * 0.0001f);
     } else if (texture_value.outcome == DepthLimit) {
-        color = vec3(vec3(0.2f, 0.4f, 1.0f) * 3.0f + texture_value.steps * 0.01f);
+        color = vec3(vec3(0.2f, 0.4f, 1.0f) * 3.0f * 0.0f + texture_value.steps * 0.01f);
     }
 
     color = min(vec3(1.0), max(vec3(0.0), hdr_map_aces_tone(color)));
+    color = vec3(texture_value.depth * 0.001f);
 
     unsigned int rgba = ((unsigned int) (255.0f * color.x) & 0xff) |
                         (((unsigned int) (255.0f * color.y) & 0xff) << 8) |

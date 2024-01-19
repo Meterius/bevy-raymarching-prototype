@@ -28,15 +28,15 @@ pub struct RenderSettings {
 #[derive(Debug, Clone, Resource, Reflect)]
 #[reflect(Resource)]
 pub struct RenderConeCompression {
-    enabled: bool,
-    levels: [usize; CONE_MARCH_LEVELS as usize],
+    pub enabled: bool,
+    pub levels: [usize; CONE_MARCH_LEVELS as usize],
 }
 
 impl Default for RenderConeCompression {
     fn default() -> Self {
         Self {
             enabled: true,
-            levels: [16, 8, 4, 2],
+            levels: [16, 8, 4, 1],
         }
     }
 }
@@ -303,7 +303,7 @@ fn render(
         spheres: spheres.try_into().unwrap(),
         sphere_count: 0, // MAX_SPHERE_COUNT as i32,
         lighting: crate::bindings::cuda::SdRuntimeSceneLighting {
-            sun_light_count: 1,
+            sun_light_count: 0,
             sun_lights: sun_lights.try_into().unwrap(),
         },
     };
