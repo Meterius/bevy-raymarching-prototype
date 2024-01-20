@@ -3,7 +3,7 @@
 #define CONE_MARCH_LEVELS 4
 #define MAX_SUN_LIGHT_COUNT 10
 #define MAX_POINT_LIGHT_COUNT 10
-#define MAX_SPHERE_COUNT 1024
+#define MAX_SPHERE_COUNT 256
 // #define DISABLE_CONE_MARCH
 
 enum RayMarchHitOutcome {
@@ -16,7 +16,6 @@ struct RenderDataTextureValue {
     enum RayMarchHitOutcome outcome;
     float color[3];
     float light;
-    float padding;
 };
 
 struct RenderDataTexture {

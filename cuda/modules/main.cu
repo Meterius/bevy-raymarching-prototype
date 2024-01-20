@@ -148,6 +148,11 @@ __device__ auto make_sds_scene(GlobalsBuffer &globals, CameraBuffer &camera) {
 
     return [=](vec3 p, RenderSurfaceData &surface_output) {
         float sd = box_sds(p, surface_output);
+
+        for (int i = 0; i < 300; i++) {
+            sd = min(sd, box_sds(p + vec3(5.0f * i, -10.0f, 0.0f), surface_output));
+        }
+
         sd = min(runtime_scene_sds(p, surface_output), sd);
         //sd = min(plane_scene_sds(p, surface_output), sd);
         sd = min(mandelbulb_scene_sds(p, surface_output), sd);
@@ -278,31 +283,6 @@ extern "C" __global__ void compute_compressed_depth(
         return;
     }
 
-    const auto texture_to_dir = [&camera, &cm_textures, &level, &globals](
-        vec2 p
-    ) {
-        vec2 ndc_coord = texture_to_ndc(
-            p,
-            {
-                cm_textures.textures[level].size[0],
-                cm_textures.textures[level].size[1]
-            }
-        );
-        vec2 cam_coord = ndc_to_camera(
-            ndc_coord,
-            {
-                cm_textures.textures[level].size[0],
-                cm_textures.textures[level].size[1]
-            }
-        );
-        return camera_to_ray(
-            cam_coord,
-            camera,
-            from_array(globals.render_screen_size),
-            vec2(globals.render_texture_size[0], globals.render_texture_size[1])
-        );
-    };
-
     uvec2 cm_texture_coord = uvec2(
         id % cm_textures.textures[level].size[0],
         id / cm_textures.textures[level].size[0]
@@ -329,33 +309,6 @@ extern "C" __global__ void compute_compressed_depth(
             from_array(globals.render_screen_size),
             vec2(globals.render_texture_size[0], globals.render_texture_size[1])
         )
-    };
-
-    vec3 border_dirs[4] = {
-        texture_to_dir(
-            {
-                (float) cm_texture_coord[0] - SQRT_INV,
-                (float) cm_texture_coord[1] - SQRT_INV
-            }
-        ),
-        texture_to_dir(
-            {
-                (float) cm_texture_coord[0] - SQRT_INV,
-                (float) cm_texture_coord[1] + SQRT_INV
-            }
-        ),
-        texture_to_dir(
-            {
-                (float) cm_texture_coord[0] + SQRT_INV,
-                (float) cm_texture_coord[1] - SQRT_INV
-            }
-        ),
-        texture_to_dir(
-            {
-                (float) cm_texture_coord[0] + SQRT_INV,
-                (float) cm_texture_coord[1] + SQRT_INV
-            }
-        ),
     };
 
     float cone_radius_at_unit = get_pixel_cone_radius(
@@ -436,6 +389,36 @@ extern "C" __global__ void compute_compressed_depth(
 }
 #endif
 
+__device__ ivec2 render_texture_coord(ivec2 render_texture_size) {
+    const int WARP_H = 8;
+    const int WARP_W = 4;
+
+    int warp_local_id = threadIdx.x % 32;
+    ivec2 warp_local_coord = { warp_local_id % WARP_W, warp_local_id / WARP_W };
+
+    const int block_warp_count = 2;
+
+    int warp_id = threadIdx.x / 32;
+    ivec2 warp_coord = { warp_id % block_warp_count, warp_id / block_warp_count };
+
+    ivec2 block_local_texture_coord = {
+        warp_local_coord.x + WARP_W * warp_coord.x,
+        warp_local_coord.y + WARP_H * warp_coord.y
+    };
+
+    ivec2 block_count = {
+        render_texture_size.x / (WARP_W * block_warp_count),
+        render_texture_size.x / (WARP_H * block_warp_count),
+    };
+
+    ivec2 block_texture_coord = {
+        (WARP_W * block_warp_count) * (blockIdx.x % block_count.x),
+        (WARP_H * block_warp_count) * (blockIdx.x / block_count.x)
+    };
+
+    return block_texture_coord + block_local_texture_coord;
+}
+
 extern "C" __global__ void compute_render(
     RenderDataTexture render_data_texture,
     ConeMarchTextures cm_textures,
@@ -461,27 +444,13 @@ extern "C" __global__ void compute_render(
     // calculate ray
 
     u32 id = blockIdx.x * blockDim.x + threadIdx.x;
+    uvec2 texture_coord = render_texture_coord({ render_data_texture.size[0], render_data_texture.size[1] });
 
-    uvec2 texture_coord;
-    if (compression_enabled && CONE_MARCH_LEVELS != 0) {
-        int cm_block_w = render_data_texture.size[0] / cm_textures.textures[CONE_MARCH_LEVELS - 1].size[0];
-        int cm_block_h = render_data_texture.size[1] / cm_textures.textures[CONE_MARCH_LEVELS - 1].size[1];
-        int cm_block_size = cm_block_w * cm_block_h;
-
-        int cm_block_count_x = cm_textures.textures[CONE_MARCH_LEVELS - 1].size[0];
-
-        int cm_block_idx = id / cm_block_size;
-        int cm_item_idx = id % cm_block_size;
-
-        texture_coord.x = cm_item_idx % cm_block_w + cm_block_w * (cm_block_idx % cm_block_count_x);
-        texture_coord.y = cm_item_idx / cm_block_w + cm_block_h * (cm_block_idx / cm_block_count_x);
-    } else {
-        texture_coord = uvec2(
-            id % render_data_texture.size[0], id / render_data_texture.size[0]
-        );
+    if (texture_coord.y >= render_data_texture.size[1] || texture_coord.x >= render_data_texture.size[0]) {
+        return;
     }
 
-    u32 texture_index = index_2d(texture_coord, render_data_texture);
+    u32 texture_index = id;
 
     vec2 ndc_coord = texture_to_ndc(
         texture_coord,
@@ -532,11 +501,17 @@ extern "C" __global__ void compute_render(
     ConeMarchTextureValue entry = {0.0f, 0, Collision};
 #endif
 
+    float cone_radius_at_unit = get_pixel_cone_radius(
+        texture_coord, camera, render_data_texture,
+        globals
+    );
+
     // ray march and fill preliminary values in render data texture
 
     auto sds = make_sds_scene(globals, camera);
     RayRender ray_render = render_ray(
         ray,
+        cone_radius_at_unit,
         sds,
         runtime_scene.lighting,
         entry
@@ -569,10 +544,10 @@ extern "C" __global__ void compute_render_finalize(
     bool compression_enabled
 ) {
     u32 id = blockIdx.x * blockDim.x + threadIdx.x;
-    ivec2 texture_coord = ivec2(
-        id % render_data_texture.size[0], id / render_data_texture.size[0]
-    );
-    RenderDataTextureValue texture_value = render_data_texture.texture[id];
+    uvec2 texture_coord = render_texture_coord({ render_data_texture.size[0], render_data_texture.size[1] });
+    u32 texture_index = id;
+
+    RenderDataTextureValue texture_value = render_data_texture.texture[texture_index];
 
     float blended_steps = 0.0f;
 
@@ -652,5 +627,5 @@ extern "C" __global__ void compute_render_finalize(
                         (((unsigned int) (255.0f * color.z) & 0xff) << 16) |
                         (255 << 24);
 
-    render_texture.texture[id] = rgba;
+    render_texture.texture[index_2d(texture_coord, render_texture)] = rgba;
 }

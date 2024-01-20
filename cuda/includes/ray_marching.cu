@@ -50,9 +50,7 @@ __device__ RayMarchHit ray_march(
                 hit.depth += diff;
             }
 
-            hit.position.x = glm::fma(diff, ray.direction.x, hit.position.x);
-            hit.position.y = glm::fma(diff, ray.direction.y, hit.position.y);
-            hit.position.z = glm::fma(diff, ray.direction.z, hit.position.z);
+            hit.position += diff * ray.direction;
 
             if (hit.depth > RAY_MARCH_DEPTH_LIMIT) {
                 hit.outcome = DepthLimit;

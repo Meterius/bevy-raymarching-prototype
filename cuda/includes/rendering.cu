@@ -10,11 +10,16 @@ using namespace glm;
 
 template<typename SdsFunc>
 __device__ RayRender
-render_ray(Ray ray, SdsFunc sds_func, SdRuntimeSceneLighting lighting, ConeMarchTextureValue starting) {
+render_ray(
+    Ray ray, float cone_radius_at_unit, SdsFunc sds_func, SdRuntimeSceneLighting lighting,
+    ConeMarchTextureValue starting
+) {
     RenderSurfaceData surface {
         { 0.0f, 0.0f, 0.0f }
     };
-    RayMarchHit hit = ray_march<false>([&](vec3 p) { return sds_func(p, surface); }, ray, starting);
+    RayMarchHit hit = ray_march<true>(
+        [&](vec3 p) { return sds_func(p, surface); }, ray, starting, cone_radius_at_unit
+    );
 
     float light = 0.3f;
     // vec3 normal = sd_normal(hit.position, [&](vec3 p) { return sds_func(p, surface); });

@@ -16,8 +16,7 @@ use std::sync::Arc;
 
 const RENDER_TEXTURE_SIZE: (usize, usize) = (2560, 1440);
 
-const CUDA_GPU_BLOCK_SIZE: usize = 512;
-const CUDA_GPU_HARDWARE_MAX_PARALLEL_BLOCK_COUNT: usize = 128;
+const CUDA_GPU_BLOCK_SIZE: usize = 128;
 
 #[derive(Debug, Clone, Default, Resource, Reflect)]
 #[reflect(Resource)]
@@ -36,7 +35,7 @@ impl Default for RenderConeCompression {
     fn default() -> Self {
         Self {
             enabled: true,
-            levels: [16, 8, 4, 1],
+            levels: [16, 8, 4, 2],
         }
     }
 }
