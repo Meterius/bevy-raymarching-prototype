@@ -264,13 +264,13 @@ fn render(
             space_variant: SdSpaceCompositionVariant_Identity,
             space_data: [0.0; 3],
             parent: 0,
-            left: 0,
-            right: 0,
+            child_leftmost: 0,
+            child_rightmost: 0,
             primitive: SdPrimitiveVariant_None,
         });
     }
 
-    const LEVELS: usize = 6;
+    const LEVELS: usize = 7;
 
     for i in 0..LEVELS {
         for j in 0..2usize.pow(i as u32) {
@@ -291,8 +291,8 @@ fn render(
                 } else {
                     2i32.pow(i as u32 - 1) - 1 + j as i32 / 2
                 },
-                left: 2i32.pow(i as u32 + 1) - 1 + 2 * j as i32,
-                right: 2i32.pow(i as u32 + 1) - 1 + 2 * j as i32 + 1,
+                child_leftmost: 2i32.pow(i as u32 + 1) - 1 + 2 * j as i32,
+                child_rightmost: 2i32.pow(i as u32 + 1) - 1 + 2 * j as i32 + 1,
                 primitive: if i == LEVELS - 1 {
                     SdPrimitiveVariant_Sphere
                 } else {
@@ -306,8 +306,6 @@ fn render(
         .device
         .htod_copy_into(compositions, &mut render_buffers.compositions_buffer)
         .unwrap();
-
-    // println!("{:?}", &nodes[0..(2i32.pow(LEVELS as u32) - 1) as usize]);
 
     // Render Parameters
 
