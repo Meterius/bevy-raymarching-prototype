@@ -1,18 +1,19 @@
-use crate::bindings::cuda::MAX_SUN_LIGHT_COUNT;
 use crate::bindings::cuda::{
-    ConeMarchTextureValue, RenderDataTextureValue, SdSphere, CONE_MARCH_LEVELS, MAX_SPHERE_COUNT,
+    ConeMarchTextureValue, RenderDataTextureValue, SdCombineCompositionVariant_Union,
+    SdPrimitiveVariant_None, SdPrimitiveVariant_Sphere, SdSpaceCompositionVariant_Identity,
+    SdSpaceCompositionVariant_Translation, CONE_MARCH_LEVELS,
 };
+use crate::bindings::cuda::{SdComposition, MAX_SUN_LIGHT_COUNT};
 use bevy::core_pipeline::clear_color::ClearColorConfig;
 use bevy::render::extract_resource::ExtractResource;
 use bevy::window::PrimaryWindow;
 use bevy::{prelude::*, render::render_resource::*};
-use cudarc::driver::{
-    result, sys, CudaDevice, CudaSlice, CudaStream, DevicePtr, LaunchAsync, LaunchConfig,
-};
+use cudarc::driver::{CudaDevice, CudaSlice, CudaStream, DevicePtr, LaunchAsync, LaunchConfig};
 use cudarc::nvrtc::Ptx;
 use nvtx::mark;
-use std::io::Read;
 use std::sync::Arc;
+
+const MAX_COMPOSITION_NODE_COUNT: usize = 4096;
 
 const RENDER_TEXTURE_SIZE: (usize, usize) = (2560, 1440);
 
@@ -63,7 +64,7 @@ struct RenderCudaBuffers {
     render_texture_buffer: CudaSlice<u8>,
 
     cm_texture_buffers: [Vec<CudaSlice<ConeMarchTextureValue>>; 2],
-    rt_sphere_buffer: [CudaSlice<SdSphere>; 2],
+    compositions_buffer: CudaSlice<SdComposition>,
 }
 
 // App Systems
@@ -155,11 +156,10 @@ fn setup_cuda(world: &mut World) {
             .unwrap()
     };
 
-    let rt_sphere_buffer = unsafe {
-        [
-            device.alloc::<SdSphere>(1024).unwrap(),
-            device.alloc::<SdSphere>(1024).unwrap(),
-        ]
+    let compositions_buffer = unsafe {
+        device
+            .alloc::<SdComposition>(MAX_COMPOSITION_NODE_COUNT)
+            .unwrap()
     };
 
     let mut cm_texture_buffers = [vec![], vec![]];
@@ -200,7 +200,7 @@ fn setup_cuda(world: &mut World) {
         render_texture_buffer,
         render_data_texture_buffer,
         cm_texture_buffers,
-        rt_sphere_buffer,
+        compositions_buffer,
     });
 }
 
@@ -224,7 +224,7 @@ fn render(
     time: Res<Time>,
     camera: Query<(&Camera, &Projection, &GlobalTransform), With<RenderCameraTarget>>,
     render_context: NonSend<RenderCudaContext>,
-    mut render_streams: NonSendMut<RenderCudaStreams>,
+    render_streams: NonSendMut<RenderCudaStreams>,
     mut render_buffers: NonSendMut<RenderCudaBuffers>,
     render_target_image: Res<RenderTargetImage>,
     mut images: ResMut<Assets<Image>>,
@@ -254,6 +254,61 @@ fn render(
         cudarc::driver::result::stream::synchronize(render_streams.render_stream.stream).unwrap()
     };
 
+    // Update Compositions Buffer
+
+    let mut compositions = Vec::with_capacity(MAX_COMPOSITION_NODE_COUNT as usize);
+
+    for _ in 0..MAX_COMPOSITION_NODE_COUNT as usize {
+        compositions.push(SdComposition {
+            combine_variant: SdCombineCompositionVariant_Union,
+            space_variant: SdSpaceCompositionVariant_Identity,
+            space_data: [0.0; 3],
+            parent: 0,
+            left: 0,
+            right: 0,
+            primitive: SdPrimitiveVariant_None,
+        });
+    }
+
+    const LEVELS: usize = 6;
+
+    for i in 0..LEVELS {
+        for j in 0..2usize.pow(i as u32) {
+            compositions[2usize.pow(i as u32) - 1 + j] = SdComposition {
+                combine_variant: SdCombineCompositionVariant_Union,
+                space_variant: if i == LEVELS - 1 {
+                    SdSpaceCompositionVariant_Translation
+                } else {
+                    SdSpaceCompositionVariant_Identity
+                },
+                space_data: if i == LEVELS - 1 {
+                    [-2.0 * j as f32, 0.0, 0.0]
+                } else {
+                    [0.0; 3]
+                },
+                parent: if i == 0 {
+                    -1
+                } else {
+                    2i32.pow(i as u32 - 1) - 1 + j as i32 / 2
+                },
+                left: 2i32.pow(i as u32 + 1) - 1 + 2 * j as i32,
+                right: 2i32.pow(i as u32 + 1) - 1 + 2 * j as i32 + 1,
+                primitive: if i == LEVELS - 1 {
+                    SdPrimitiveVariant_Sphere
+                } else {
+                    SdPrimitiveVariant_None
+                },
+            };
+        }
+    }
+
+    render_context
+        .device
+        .htod_copy_into(compositions, &mut render_buffers.compositions_buffer)
+        .unwrap();
+
+    // println!("{:?}", &nodes[0..(2i32.pow(LEVELS as u32) - 1) as usize]);
+
     // Render Parameters
 
     let globals = crate::bindings::cuda::GlobalsBuffer {
@@ -277,30 +332,18 @@ fn render(
         },
     };
 
-    let mut spheres = Vec::with_capacity(MAX_SPHERE_COUNT as usize);
-
-    for i in 0..MAX_SPHERE_COUNT as usize {
-        spheres.push(SdSphere {
-            translation: [
-                i as f32 * 0.7,
-                (time.elapsed_seconds() * (i as f32 / 10.0)).sin() * (i as f32 / 25.0),
-                (time.elapsed_seconds() * (i as f32 / 10.0)).cos() * (i as f32 / 25.0),
-            ],
-            radius: 0.3,
-        });
-    }
-
     let mut sun_lights = Vec::with_capacity(MAX_SUN_LIGHT_COUNT as usize);
 
-    for i in 0..MAX_SUN_LIGHT_COUNT as usize {
+    for _ in 0..MAX_SUN_LIGHT_COUNT as usize {
         sun_lights.push(crate::bindings::cuda::SunLight {
             direction: Vec3::new(1.0, -1.0, 0.2).normalize().into(),
         });
     }
 
     let sd_runtime_scene = crate::bindings::cuda::SdRuntimeScene {
-        spheres: spheres.try_into().unwrap(),
-        sphere_count: 0, // MAX_SPHERE_COUNT as i32,
+        compositions: unsafe {
+            std::mem::transmute(*(&render_buffers.compositions_buffer).device_ptr())
+        },
         lighting: crate::bindings::cuda::SdRuntimeSceneLighting {
             sun_light_count: 0,
             sun_lights: sun_lights.try_into().unwrap(),

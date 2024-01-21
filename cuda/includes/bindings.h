@@ -1,9 +1,9 @@
 #pragma once
 
 #define CONE_MARCH_LEVELS 4
-#define MAX_SUN_LIGHT_COUNT 10
-#define MAX_POINT_LIGHT_COUNT 10
-#define MAX_SPHERE_COUNT 256
+#define MAX_SUN_LIGHT_COUNT 1
+#define MAX_POINT_LIGHT_COUNT 1
+#define MAX_COMPOSITION_NODE_COUNT 4096
 // #define DISABLE_CONE_MARCH
 
 enum RayMarchHitOutcome {
@@ -70,9 +70,31 @@ struct SunLight {
     float direction[3];
 };
 
-struct SdSphere {
-    float translation[3];
-    float radius;
+enum SdPrimitiveVariant {
+    None, Sphere, Cube
+};
+
+enum SdSpaceCompositionVariant {
+    Identity,
+    Translation,
+    Scale,
+};
+
+enum SdCombineCompositionVariant {
+    Union,
+};
+
+struct SdComposition {
+    enum SdSpaceCompositionVariant space_variant;
+    float space_data[3];
+
+    enum SdCombineCompositionVariant combine_variant;
+
+    enum SdPrimitiveVariant primitive;
+
+    int left;
+    int right;
+    int parent;
 };
 
 struct SdRuntimeSceneLighting {
@@ -81,8 +103,6 @@ struct SdRuntimeSceneLighting {
 };
 
 struct SdRuntimeScene {
-    int sphere_count;
-    struct SdSphere spheres[MAX_SPHERE_COUNT];
-
+    struct SdComposition *compositions;
     struct SdRuntimeSceneLighting lighting;
 };

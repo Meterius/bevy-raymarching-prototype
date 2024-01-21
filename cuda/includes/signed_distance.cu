@@ -72,6 +72,120 @@ __device__ float sd_axes(vec3 p) {
     return min(min(length(px) - 0.05f, length(py) - 0.05f), length(pz) - 0.05f);
 }
 
+// runtime
+
+struct RuntimeStackNode {
+    vec3 position;
+    float sd;
+    int child_index;
+};
+
+__shared__ RuntimeStackNode sd_runtime_stack[128 * 10];
+
+__device__ float sd_runtime(vec3 p, SdComposition nodes[]) {
+    unsigned int stack_index = threadIdx.x * 10;
+    int index = 0;
+    float sd = 0.0f;
+
+    sd_runtime_stack[stack_index] = { p, 0.0f, 0 };
+
+    while (index != -1) {
+        SdComposition node = nodes[index];
+        RuntimeStackNode stack_node = sd_runtime_stack[stack_index];
+
+        vec3 position = stack_node.position;
+
+        const auto apply_space_variant = [&]() {
+            switch (node.space_variant) {
+                case SdSpaceCompositionVariant::Identity:
+                    break;
+
+                case SdSpaceCompositionVariant::Translation:
+                    position.x -= node.space_data[0];
+                    position.y -= node.space_data[1];
+                    position.z -= node.space_data[2];
+                    break;
+
+                case SdSpaceCompositionVariant::Scale:
+                    position.x *= node.space_data[0];
+                    position.y *= node.space_data[1];
+                    position.z *= node.space_data[2];
+                    break;
+            }
+        };
+
+        if (node.primitive != SdPrimitiveVariant::None) {
+            apply_space_variant();
+
+            switch (node.primitive) {
+                case SdPrimitiveVariant::None:
+                    break;
+
+                case SdPrimitiveVariant::Sphere:
+                    sd = length(position) - 1.0f;
+                    break;
+
+                case SdPrimitiveVariant::Cube:
+                    sd = 0.0f;
+                    break;
+            }
+
+            switch (node.space_variant) {
+                case SdSpaceCompositionVariant::Identity:
+                case SdSpaceCompositionVariant::Translation:
+                    break;
+
+                case SdSpaceCompositionVariant::Scale:
+                    sd *= min(node.space_data[0], min(node.space_data[1], node.space_data[2]));
+                    break;
+            }
+
+            index = node.parent;
+            stack_index -= 1;
+        } else if (stack_node.child_index == 2) {
+            switch (node.combine_variant) {
+                case SdCombineCompositionVariant::Union:
+                    sd = min(stack_node.sd, sd);
+                    break;
+            }
+
+            switch (node.space_variant) {
+                case SdSpaceCompositionVariant::Identity:
+                case SdSpaceCompositionVariant::Translation:
+                    break;
+
+                case SdSpaceCompositionVariant::Scale:
+                    sd = sd * min(node.space_data[0], min(node.space_data[1], node.space_data[2]));
+                    break;
+            }
+
+            index = node.parent;
+            stack_index -= 1;
+        } else {
+            if (stack_node.child_index == 0) {
+                apply_space_variant();
+
+                sd_runtime_stack[stack_index].child_index += 1;
+                stack_index += 1;
+                sd_runtime_stack[stack_index].position = position;
+                sd_runtime_stack[stack_index].child_index = 0;
+                index = node.left;
+            } else {
+                apply_space_variant();
+
+                sd_runtime_stack[stack_index].sd = sd;
+                sd_runtime_stack[stack_index].child_index += 1;
+                stack_index += 1;
+                sd_runtime_stack[stack_index].position = position;
+                sd_runtime_stack[stack_index].child_index = 0;
+                index = node.right;
+            }
+        }
+    }
+
+    return sd;
+}
+
 // surface
 
 template<typename SFunc>

@@ -90,7 +90,7 @@ __device__ vec3 camera_to_ray(
 
 // scene
 
-__shared__ SdRuntimeScene runtime_scene;
+__device__ SdRuntimeScene runtime_scene;
 
 __device__ auto make_sds_scene(GlobalsBuffer &globals, CameraBuffer &camera) {
     auto box_sds = make_generic_sds(
@@ -102,17 +102,7 @@ __device__ auto make_sds_scene(GlobalsBuffer &globals, CameraBuffer &camera) {
 
     auto runtime_scene_sds = make_generic_sds(
         [](vec3 p) {
-            float sd = 3.40282347E+38f;
-            for (int i = 0; i < runtime_scene.sphere_count; i++) {
-                sd =
-                    min(
-                        sd,
-                        length(
-                            p - from_array(runtime_scene.spheres[i].translation)
-                        ) - runtime_scene.spheres[i].radius
-                    );
-            }
-            return sd;
+            return sd_runtime(p, runtime_scene.compositions);
         },
         RenderSurfaceData { vec3(0.0, 0.0, 1.0) }
     );
@@ -149,13 +139,13 @@ __device__ auto make_sds_scene(GlobalsBuffer &globals, CameraBuffer &camera) {
     return [=](vec3 p, RenderSurfaceData &surface_output) {
         float sd = box_sds(p, surface_output);
 
-        for (int i = 0; i < 300; i++) {
+        for (int i = 0; i < 0; i++) {
             sd = min(sd, box_sds(p + vec3(5.0f * i, -10.0f, 0.0f), surface_output));
         }
 
         sd = min(runtime_scene_sds(p, surface_output), sd);
         //sd = min(plane_scene_sds(p, surface_output), sd);
-        sd = min(mandelbulb_scene_sds(p, surface_output), sd);
+        // sd = min(mandelbulb_scene_sds(p, surface_output), sd);
         // sd = min(axes_scene_sds(p, surface_output), sd);
         return sd;
     };
@@ -266,12 +256,8 @@ extern "C" __global__ void compute_compressed_depth(
     CameraBuffer camera,
     SdRuntimeScene runtime_scene_param
 ) {
-    runtime_scene.sphere_count = runtime_scene_param.sphere_count;
-
-    int perThread = runtime_scene.sphere_count / blockDim.x;
-    for (int i = 0; i < perThread; i++) {
-        runtime_scene.spheres[threadIdx.x * perThread + i] =
-            runtime_scene_param.spheres[threadIdx.x * perThread + i];
+    if (!threadIdx.x) {
+        runtime_scene = runtime_scene_param;
     }
 
     __syncthreads();
@@ -427,17 +413,9 @@ extern "C" __global__ void compute_render(
     SdRuntimeScene runtime_scene_param,
     bool compression_enabled
 ) {
-    // store runtime scene data in shared memory
-
-    runtime_scene.sphere_count = runtime_scene_param.sphere_count;
-
-    int perThread = runtime_scene.sphere_count / blockDim.x;
-    for (int i = 0; i < perThread; i++) {
-        runtime_scene.spheres[threadIdx.x * perThread + i] =
-            runtime_scene_param.spheres[threadIdx.x * perThread + i];
+    if (!threadIdx.x) {
+        runtime_scene = runtime_scene_param;
     }
-
-    runtime_scene.lighting = runtime_scene_param.lighting;
 
     __syncthreads();
 
