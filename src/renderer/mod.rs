@@ -14,7 +14,7 @@ use cudarc::nvrtc::Ptx;
 use nvtx::mark;
 use std::sync::Arc;
 
-const MAX_COMPOSITION_NODE_COUNT: usize = 2048;
+const MAX_COMPOSITION_NODE_COUNT: usize = 4096;
 const MAX_CUBE_NODE_COUNT: usize = 2048;
 const MAX_SPHERE_NODE_COUNT: usize = 2048;
 
@@ -53,7 +53,8 @@ pub struct RenderTargetSprite {}
 #[derive(Clone, Resource, ExtractResource, Deref)]
 struct RenderTargetImage(Handle<Image>);
 
-#[derive(Clone, Debug, Resource)]
+#[derive(Clone, Debug, Reflect, Resource)]
+#[reflect(Resource)]
 struct RenderSceneGeometry {
     compositions: Vec<SdComposition>,
     spheres: Vec<SdSpherePrimitive>,
@@ -125,7 +126,7 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     commands.spawn((
         SpriteBundle {
             sprite: Sprite {
-                color: Color::rgba(1.0, 1.0, 1.0, 1.0),
+                color: Color::rgba(1.0, 1.0, 1.0, 0.5),
                 custom_size: Some(Vec2::new(
                     RENDER_TEXTURE_SIZE.0 as f32,
                     RENDER_TEXTURE_SIZE.1 as f32,
@@ -579,6 +580,7 @@ impl Plugin for RayMarcherRenderPlugin {
             .insert_non_send_resource(PreviousRenderParameter::default());
 
         app.register_type::<RenderConeCompression>()
+            .register_type::<RenderSceneGeometry>()
             .insert_resource(RenderSceneGeometry::default())
             .add_systems(Startup, (setup, setup_cuda))
             .add_systems(Last, render)

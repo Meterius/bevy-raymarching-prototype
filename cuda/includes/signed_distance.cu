@@ -52,6 +52,20 @@ __device__ float sd_mandelbulb(vec3 p, float time) {
 
 // primitives
 
+__device__ float sd_unit_sphere(vec3 p) {
+    return length(p) - 0.5f;
+}
+
+__device__ float sd_unit_cube(vec3 p) {
+    return max(
+        max(p.x - 0.5f, 0.5f - p.x),
+        max(
+            max(p.y - 0.5f, 0.5f - p.y),
+            max(p.z - 0.5f, 0.5f - p.z)
+        )
+    );
+}
+
 __device__ float sd_box(vec3 p, vec3 bp, vec3 bs) {
     vec3 q = abs(p - bp) - bs / 2.0f;
     float udst = length(max(q, vec3(0.0f)));
@@ -81,7 +95,7 @@ struct RuntimeStackNode {
 };
 
 #define BLOCK_DIM 128
-#define SD_RUNTIME_STACK_MAX_DEPTH 8
+#define SD_RUNTIME_STACK_MAX_DEPTH 12
 
 __shared__ RuntimeStackNode sd_runtime_stack[SD_RUNTIME_STACK_MAX_DEPTH * BLOCK_DIM];
 
@@ -102,6 +116,30 @@ __device__ float sd_composition(
 
         vec3 position = stack_node.position;
 
+        float bound_distance = max(
+            max(
+                node.bound_min[0] - position.x,
+                max(node.bound_min[1] - position.y, node.bound_min[2] - position.z)
+            ),
+            max(
+                position.x - node.bound_max[0],
+                max(position.y - node.bound_max[1], position.z - node.bound_max[2])
+            )
+        );
+
+        if (bound_distance > 1.0) {
+            sd = bound_distance;
+
+            if (index == composition_index) {
+                break;
+            }
+
+            index = node.parent;
+            stack_index -= BLOCK_DIM;
+
+            continue;
+        }
+
         switch (node.variant) {
             case SdCompositionVariant::Union:
             case SdCompositionVariant::Difference:
@@ -117,18 +155,18 @@ __device__ float sd_composition(
 
                 case SdPrimitiveVariant::Sphere:
                     rev_scale = minimum(from_array(geometry.sphere_primitives[node.primitive].scale));
-                    sd = (length(
+                    sd = sd_unit_sphere(
                         (position - from_array(geometry.sphere_primitives[node.primitive].translation))
                         / from_array(geometry.sphere_primitives[node.primitive].scale)
-                    ) - 1.0f) * rev_scale;
+                    ) * rev_scale;
                     break;
 
                 case SdPrimitiveVariant::Cube:
                     rev_scale = minimum(from_array(geometry.cube_primitives[node.primitive].scale));
-                    sd = (length(
+                    sd = sd_unit_cube(
                         (position - from_array(geometry.cube_primitives[node.primitive].translation))
                         / from_array(geometry.cube_primitives[node.primitive].scale)
-                    ) - 1.0f) * rev_scale;
+                    ) * rev_scale;
                     break;
             }
 

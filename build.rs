@@ -1,11 +1,64 @@
+use proc_macro2::TokenStream;
+use quote::quote;
 use std::ops::Deref;
 use std::path::PathBuf;
+use syn::{parse_file, Attribute, Item, Meta};
+
+// Utility
+
+fn add_derive_extensions_to_structs(
+    code: &str,
+    structs_to_modify: &[&str],
+    extensions: &[&str],
+) -> String {
+    let ast = parse_file(code).expect("Failed to parse code");
+
+    let modified_ast = ast
+        .items
+        .into_iter()
+        .map(|item| {
+            if let Item::Struct(struct_item) = &item {
+                if structs_to_modify.contains(&&*struct_item.ident.to_string()) {
+                    let mut new_struct = struct_item.clone();
+                    extend_derive_with(&mut new_struct.attrs, extensions);
+                    return Item::Struct(new_struct);
+                }
+            }
+            item
+        })
+        .collect::<Vec<_>>();
+
+    let tokens = quote! {
+        #(#modified_ast)*
+    };
+
+    tokens.to_string()
+}
+
+fn extend_derive_with(attrs: &mut Vec<Attribute>, extensions: &[&str]) {
+    for attr in attrs.iter_mut() {
+        match &mut attr.meta {
+            Meta::List(ref mut meta_list) => {
+                if meta_list.path.is_ident("derive") {
+                    for ext in extensions.iter() {
+                        meta_list
+                            .tokens
+                            .extend(TokenStream::from_str(format!(", {ext}").as_str()));
+                    }
+                    break;
+                }
+            }
+            _ => {}
+        };
+    }
+}
 
 // CUDA
 
 extern crate cc;
 
 use std::process::Command;
+use std::str::FromStr;
 
 #[allow(unused_macros)]
 macro_rules! warn {
@@ -81,6 +134,11 @@ fn compile_cuda() {
     // You can copy this regex to add/modify other types of pointers, for example "*mut i32"
     let modified_bindings = generated_bindings;
     let modified_bindings = String::from("#![allow(warnings)]\n") + modified_bindings.deref();
+    let modified_bindings = add_derive_extensions_to_structs(
+        modified_bindings.as_str(),
+        &["SdSpherePrimitive", "SdCubePrimitive", "SdComposition"],
+        &["Default", "bevy::prelude::Reflect"],
+    );
 
     // Write the bindings to the $OUT_DIR/bindings.rs file.
     std::fs::write("src/bindings/cuda.rs", modified_bindings.as_bytes())

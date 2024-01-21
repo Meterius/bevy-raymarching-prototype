@@ -95,6 +95,9 @@ struct SdComposition {
     enum SdPrimitiveVariant primitive_variant;
     int primitive;
 
+    float bound_max[3];
+    float bound_min[3];
+
     int child_leftmost;
     int child_rightmost;
 

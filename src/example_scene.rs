@@ -8,24 +8,12 @@ pub fn setup_scene(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    // cube
-    commands.spawn((
-        PbrBundle {
-            mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
-            material: materials.add(Color::rgb_u8(124, 144, 255).into()),
-            transform: Transform::from_xyz(0.0, 0.5, 0.0),
-            ..default()
-        },
-        SdPrimitive::Box(Vec3::new(1.0, 1.0, 1.0)),
-        SdVisual::default(),
-    ));
-
-    for i in 0..100 {
+    for i in 0..512 {
         commands.spawn((
             PbrBundle {
-                mesh: meshes.add(Mesh::from(shape::Cube { size: 0.5 })),
+                mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
                 material: materials.add(Color::rgb_u8(124, 144, 255).into()),
-                transform: Transform::from_xyz(-4.0 + (i as f32) * -3.0, 0.5, 0.0),
+                transform: Transform::from_xyz(-4.0 + (i as f32) * -1.0, 0.5, 0.0),
                 ..default()
             },
             SdPrimitive::Sphere(0.5),
