@@ -85,66 +85,73 @@ struct RuntimeStackNode {
 
 __shared__ RuntimeStackNode sd_runtime_stack[SD_RUNTIME_STACK_MAX_DEPTH * BLOCK_DIM];
 
-__device__ float sd_runtime(vec3 p, SdComposition nodes[]) {
+__device__ float sd_composition(
+    vec3 p,
+    SdRuntimeSceneGeometry geometry,
+    int composition_index
+) {
     unsigned int stack_index = threadIdx.x;
-    int index = 0;
+    int index = composition_index;
     float sd = 0.0f;
 
-    sd_runtime_stack[stack_index] = { p, MAX_POSITIVE_F32, nodes[0].child_leftmost };
+    sd_runtime_stack[stack_index] = { p, MAX_POSITIVE_F32, geometry.compositions[index].child_leftmost };
 
-    while (index != -1) {
-        SdComposition node = nodes[index];
+    while (true) {
+        SdComposition node = geometry.compositions[index];
         RuntimeStackNode stack_node = sd_runtime_stack[stack_index];
 
         vec3 position = stack_node.position;
 
-        switch (node.space_variant) {
-            case SdSpaceCompositionVariant::Identity:
-                break;
-
-            case SdSpaceCompositionVariant::Translation:
-                position.x -= node.space_data[0];
-                position.y -= node.space_data[1];
-                position.z -= node.space_data[2];
-                break;
-
-            case SdSpaceCompositionVariant::Scale:
-                position.x *= node.space_data[0];
-                position.y *= node.space_data[1];
-                position.z *= node.space_data[2];
+        switch (node.variant) {
+            case SdCompositionVariant::Union:
+            case SdCompositionVariant::Difference:
                 break;
         }
 
-        if (node.primitive != SdPrimitiveVariant::None) {
-            switch (node.primitive) {
+        if (node.primitive_variant != SdPrimitiveVariant::None) {
+            float rev_scale;
+
+            switch (node.primitive_variant) {
                 case SdPrimitiveVariant::None:
                     break;
 
                 case SdPrimitiveVariant::Sphere:
-                    sd = length(position) - 1.0f;
+                    rev_scale = minimum(from_array(geometry.sphere_primitives[node.primitive].scale));
+                    sd = (length(
+                        (position - from_array(geometry.sphere_primitives[node.primitive].translation))
+                        / from_array(geometry.sphere_primitives[node.primitive].scale)
+                    ) - 1.0f) * rev_scale;
                     break;
 
                 case SdPrimitiveVariant::Cube:
-                    sd = 0.0f;
+                    rev_scale = minimum(from_array(geometry.cube_primitives[node.primitive].scale));
+                    sd = (length(
+                        (position - from_array(geometry.cube_primitives[node.primitive].translation))
+                        / from_array(geometry.cube_primitives[node.primitive].scale)
+                    ) - 1.0f) * rev_scale;
                     break;
             }
 
-            switch (node.space_variant) {
-                case SdSpaceCompositionVariant::Identity:
-                case SdSpaceCompositionVariant::Translation:
+            switch (node.variant) {
+                case SdCompositionVariant::Union:
+                case SdCompositionVariant::Difference:
                     break;
+            }
 
-                case SdSpaceCompositionVariant::Scale:
-                    sd *= min(node.space_data[0], min(node.space_data[1], node.space_data[2]));
-                    break;
+            if (index == composition_index) {
+                break;
             }
 
             index = node.parent;
             stack_index -= BLOCK_DIM;
         } else {
             if (stack_node.child_index != node.child_leftmost) {
-                switch (node.combine_variant) {
-                    case SdCombineCompositionVariant::Union:
+                switch (node.variant) {
+                    case SdCompositionVariant::Difference:
+                        sd_runtime_stack[stack_index].sd = max(sd_runtime_stack[stack_index].sd, -sd);
+                        break;
+
+                    case SdCompositionVariant::Union:
                         sd_runtime_stack[stack_index].sd = min(sd_runtime_stack[stack_index].sd, sd);
                         break;
                 }
@@ -153,14 +160,14 @@ __device__ float sd_runtime(vec3 p, SdComposition nodes[]) {
             if (stack_node.child_index > node.child_rightmost) {
                 sd = sd_runtime_stack[stack_index].sd;
 
-                switch (node.space_variant) {
-                    case SdSpaceCompositionVariant::Identity:
-                    case SdSpaceCompositionVariant::Translation:
+                switch (node.variant) {
+                    case SdCompositionVariant::Union:
+                    case SdCompositionVariant::Difference:
                         break;
+                }
 
-                    case SdSpaceCompositionVariant::Scale:
-                        sd = sd * min(node.space_data[0], min(node.space_data[1], node.space_data[2]));
-                        break;
+                if (index == composition_index) {
+                    break;
                 }
 
                 index = node.parent;
@@ -171,7 +178,7 @@ __device__ float sd_runtime(vec3 p, SdComposition nodes[]) {
 
                 stack_index += BLOCK_DIM;
                 sd_runtime_stack[stack_index] = {
-                    position, MAX_POSITIVE_F32, nodes[index].child_leftmost
+                    position, MAX_POSITIVE_F32, geometry.compositions[index].child_leftmost
                 };
             }
         }

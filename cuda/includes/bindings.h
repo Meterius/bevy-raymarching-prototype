@@ -74,23 +74,26 @@ enum SdPrimitiveVariant {
     None, Sphere, Cube
 };
 
-enum SdSpaceCompositionVariant {
-    Identity,
-    Translation,
-    Scale,
+struct SdCubePrimitive {
+    float translation[3];
+    float scale[3];
 };
 
-enum SdCombineCompositionVariant {
+struct SdSpherePrimitive {
+    float translation[3];
+    float scale[3];
+};
+
+enum SdCompositionVariant {
     Union,
+    Difference // takes difference of first child against remaining children
 };
 
 struct SdComposition {
-    enum SdSpaceCompositionVariant space_variant;
-    float space_data[3];
+    enum SdCompositionVariant variant;
 
-    enum SdCombineCompositionVariant combine_variant;
-
-    enum SdPrimitiveVariant primitive;
+    enum SdPrimitiveVariant primitive_variant;
+    int primitive;
 
     int child_leftmost;
     int child_rightmost;
@@ -103,7 +106,13 @@ struct SdRuntimeSceneLighting {
     struct SunLight sun_lights[MAX_SUN_LIGHT_COUNT];
 };
 
-struct SdRuntimeScene {
+struct SdRuntimeSceneGeometry {
+    struct SdCubePrimitive *cube_primitives;
+    struct SdSpherePrimitive *sphere_primitives;
     struct SdComposition *compositions;
+};
+
+struct SdRuntimeScene {
+    struct SdRuntimeSceneGeometry geometry;
     struct SdRuntimeSceneLighting lighting;
 };

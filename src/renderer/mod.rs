@@ -1,9 +1,10 @@
+pub mod scene;
+
 use crate::bindings::cuda::{
-    ConeMarchTextureValue, RenderDataTextureValue, SdCombineCompositionVariant_Union,
-    SdPrimitiveVariant_None, SdPrimitiveVariant_Sphere, SdSpaceCompositionVariant_Identity,
-    SdSpaceCompositionVariant_Translation, CONE_MARCH_LEVELS,
+    ConeMarchTextureValue, RenderDataTextureValue, SdComposition, SdCubePrimitive,
+    SdPrimitiveVariant_None, SdPrimitiveVariant_Sphere, SdRuntimeSceneGeometry, SdSpherePrimitive,
+    CONE_MARCH_LEVELS, MAX_SUN_LIGHT_COUNT,
 };
-use crate::bindings::cuda::{SdComposition, MAX_SUN_LIGHT_COUNT};
 use bevy::core_pipeline::clear_color::ClearColorConfig;
 use bevy::render::extract_resource::ExtractResource;
 use bevy::window::PrimaryWindow;
@@ -13,7 +14,9 @@ use cudarc::nvrtc::Ptx;
 use nvtx::mark;
 use std::sync::Arc;
 
-const MAX_COMPOSITION_NODE_COUNT: usize = 4096;
+const MAX_COMPOSITION_NODE_COUNT: usize = 2048;
+const MAX_CUBE_NODE_COUNT: usize = 2048;
+const MAX_SPHERE_NODE_COUNT: usize = 2048;
 
 const RENDER_TEXTURE_SIZE: (usize, usize) = (2560, 1440);
 
@@ -50,6 +53,39 @@ pub struct RenderTargetSprite {}
 #[derive(Clone, Resource, ExtractResource, Deref)]
 struct RenderTargetImage(Handle<Image>);
 
+#[derive(Clone, Debug, Resource)]
+struct RenderSceneGeometry {
+    compositions: Vec<SdComposition>,
+    spheres: Vec<SdSpherePrimitive>,
+    cubes: Vec<SdCubePrimitive>,
+}
+
+impl Default for RenderSceneGeometry {
+    fn default() -> Self {
+        let mut compositions = Vec::with_capacity(MAX_COMPOSITION_NODE_COUNT);
+        let mut spheres = Vec::with_capacity(MAX_CUBE_NODE_COUNT);
+        let mut cubes = Vec::with_capacity(MAX_SPHERE_NODE_COUNT);
+
+        for _ in 0..MAX_COMPOSITION_NODE_COUNT {
+            compositions.push(SdComposition::default());
+        }
+
+        for _ in 0..MAX_CUBE_NODE_COUNT {
+            cubes.push(SdCubePrimitive::default());
+        }
+
+        for _ in 0..MAX_SPHERE_NODE_COUNT {
+            spheres.push(SdSpherePrimitive::default());
+        }
+
+        return Self {
+            compositions,
+            spheres,
+            cubes,
+        };
+    }
+}
+
 struct RenderCudaContext {
     device: Arc<CudaDevice>,
 }
@@ -65,6 +101,8 @@ struct RenderCudaBuffers {
 
     cm_texture_buffers: [Vec<CudaSlice<ConeMarchTextureValue>>; 2],
     compositions_buffer: CudaSlice<SdComposition>,
+    cube_primitive_buffer: CudaSlice<SdCubePrimitive>,
+    sphere_primitive_buffer: CudaSlice<SdSpherePrimitive>,
 }
 
 // App Systems
@@ -162,6 +200,18 @@ fn setup_cuda(world: &mut World) {
             .unwrap()
     };
 
+    let cube_primitive_buffer = unsafe {
+        device
+            .alloc::<SdCubePrimitive>(MAX_CUBE_NODE_COUNT)
+            .unwrap()
+    };
+
+    let sphere_primitive_buffer = unsafe {
+        device
+            .alloc::<SdSpherePrimitive>(MAX_SPHERE_NODE_COUNT)
+            .unwrap()
+    };
+
     let mut cm_texture_buffers = [vec![], vec![]];
 
     for i in 0..CONE_MARCH_LEVELS as usize {
@@ -201,6 +251,8 @@ fn setup_cuda(world: &mut World) {
         render_data_texture_buffer,
         cm_texture_buffers,
         compositions_buffer,
+        sphere_primitive_buffer,
+        cube_primitive_buffer,
     });
 }
 
@@ -221,6 +273,7 @@ struct PreviousRenderParameter {
 fn render(
     settings: Res<RenderSettings>,
     compression: Res<RenderConeCompression>,
+    geometry: Res<RenderSceneGeometry>,
     time: Res<Time>,
     camera: Query<(&Camera, &Projection, &GlobalTransform), With<RenderCameraTarget>>,
     render_context: NonSend<RenderCudaContext>,
@@ -254,57 +307,28 @@ fn render(
         cudarc::driver::result::stream::synchronize(render_streams.render_stream.stream).unwrap()
     };
 
-    // Update Compositions Buffer
-
-    let mut compositions = Vec::with_capacity(MAX_COMPOSITION_NODE_COUNT as usize);
-
-    for _ in 0..MAX_COMPOSITION_NODE_COUNT as usize {
-        compositions.push(SdComposition {
-            combine_variant: SdCombineCompositionVariant_Union,
-            space_variant: SdSpaceCompositionVariant_Identity,
-            space_data: [0.0; 3],
-            parent: 0,
-            child_leftmost: 0,
-            child_rightmost: 0,
-            primitive: SdPrimitiveVariant_None,
-        });
-    }
-
-    const LEVELS: usize = 7;
-
-    for i in 0..LEVELS {
-        for j in 0..2usize.pow(i as u32) {
-            compositions[2usize.pow(i as u32) - 1 + j] = SdComposition {
-                combine_variant: SdCombineCompositionVariant_Union,
-                space_variant: if i == LEVELS - 1 {
-                    SdSpaceCompositionVariant_Translation
-                } else {
-                    SdSpaceCompositionVariant_Identity
-                },
-                space_data: if i == LEVELS - 1 {
-                    [-2.0 * j as f32, 0.0, 0.0]
-                } else {
-                    [0.0; 3]
-                },
-                parent: if i == 0 {
-                    -1
-                } else {
-                    2i32.pow(i as u32 - 1) - 1 + j as i32 / 2
-                },
-                child_leftmost: 2i32.pow(i as u32 + 1) - 1 + 2 * j as i32,
-                child_rightmost: 2i32.pow(i as u32 + 1) - 1 + 2 * j as i32 + 1,
-                primitive: if i == LEVELS - 1 {
-                    SdPrimitiveVariant_Sphere
-                } else {
-                    SdPrimitiveVariant_None
-                },
-            };
-        }
-    }
+    render_context
+        .device
+        .htod_copy_into(
+            geometry.compositions.clone(),
+            &mut render_buffers.compositions_buffer,
+        )
+        .unwrap();
 
     render_context
         .device
-        .htod_copy_into(compositions, &mut render_buffers.compositions_buffer)
+        .htod_copy_into(
+            geometry.spheres.clone(),
+            &mut render_buffers.sphere_primitive_buffer,
+        )
+        .unwrap();
+
+    render_context
+        .device
+        .htod_copy_into(
+            geometry.cubes.clone(),
+            &mut render_buffers.cube_primitive_buffer,
+        )
         .unwrap();
 
     // Render Parameters
@@ -339,8 +363,16 @@ fn render(
     }
 
     let sd_runtime_scene = crate::bindings::cuda::SdRuntimeScene {
-        compositions: unsafe {
-            std::mem::transmute(*(&render_buffers.compositions_buffer).device_ptr())
+        geometry: SdRuntimeSceneGeometry {
+            compositions: unsafe {
+                std::mem::transmute(*(&render_buffers.compositions_buffer).device_ptr())
+            },
+            sphere_primitives: unsafe {
+                std::mem::transmute(*(&render_buffers.sphere_primitive_buffer).device_ptr())
+            },
+            cube_primitives: unsafe {
+                std::mem::transmute(*(&render_buffers.cube_primitive_buffer).device_ptr())
+            },
         },
         lighting: crate::bindings::cuda::SdRuntimeSceneLighting {
             sun_light_count: 0,
@@ -547,6 +579,7 @@ impl Plugin for RayMarcherRenderPlugin {
             .insert_non_send_resource(PreviousRenderParameter::default());
 
         app.register_type::<RenderConeCompression>()
+            .insert_resource(RenderSceneGeometry::default())
             .add_systems(Startup, (setup, setup_cuda))
             .add_systems(Last, render)
             .add_systems(PostUpdate, (synchronize_target_sprite,));

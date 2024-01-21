@@ -37,6 +37,7 @@ fn main() {
         EntityCountDiagnosticsPlugin::default(),
         EditorPlugin::default(),
         renderer::RayMarcherRenderPlugin::default(),
+        renderer::scene::RenderScenePlugin::default(),
         NoCameraPlayerPlugin,
     ));
 

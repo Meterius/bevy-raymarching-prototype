@@ -102,7 +102,7 @@ __device__ auto make_sds_scene(GlobalsBuffer &globals, CameraBuffer &camera) {
 
     auto runtime_scene_sds = make_generic_sds(
         [](vec3 p) {
-            return sd_runtime(p, runtime_scene.compositions);
+            return sd_composition(p, runtime_scene.geometry, 0);
         },
         RenderSurfaceData { vec3(0.0, 0.0, 1.0) }
     );
