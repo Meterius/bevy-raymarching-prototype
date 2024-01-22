@@ -70,43 +70,55 @@ fn compile_cuda() {
     // Tell cargo to invalidate the built crate whenever fils of interest changes.
     println!("cargo:rerun-if-changed={}", "cuda");
 
-    // Specify the desired architecture version.
-    let arch = "compute_86"; // For example, using SM 8.6 (Ampere architecture).
-    let code = "sm_86"; // For the same SM 8.6 (Ampere architecture).
-
     // build the cuda modules
     let cuda_src = PathBuf::from("cuda/modules/main.cu");
     let ptx_file = "assets/cuda/compiled/main.ptx";
+    let cubin_file = "assets/cuda/compiled/main.cubin";
 
     let mut path = std::env::var("PATH").unwrap();
     path.push_str(";C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.38.33130\\bin\\Hostx64\\x64;");
 
-    let mut nvcc_cmd = Command::new("nvcc");
+    let make_nvcc = |out_file: &str| {
+        let mut nvcc_cmd = Command::new("nvcc");
 
-    nvcc_cmd
-        .env("PATH", path)
+        nvcc_cmd
+            .env("PATH", path.as_str())
+            .arg("-o")
+            .arg(out_file)
+            .arg(&cuda_src);
+
+        if cfg!(debug_assertions) {
+            warn!("Running NVCC in debug mode");
+            nvcc_cmd.arg("-lineinfo");
+            // nvcc_cmd.arg("-G");
+            nvcc_cmd.arg("-Xptxas").arg("-O3").arg("--use_fast_math");
+        } else {
+            nvcc_cmd.arg("-Xptxas").arg("-O3").arg("--use_fast_math");
+        }
+
+        nvcc_cmd
+    };
+
+    let nvcc_status = make_nvcc(ptx_file)
+        .arg(format!("-arch={}", "compute_86"))
+        .arg(format!("-code={}", "sm_86"))
         .arg("-ptx")
-        .arg("-o")
-        .arg(&ptx_file)
-        .arg(&cuda_src)
-        .arg(format!("-arch={}", arch))
-        .arg(format!("-code={}", code))
-        .arg("-maxrregcount=70");
-
-    if cfg!(debug_assertions) {
-        warn!("Running NVCC in debug mode");
-        nvcc_cmd.arg("-lineinfo");
-        // nvcc_cmd.arg("-G");
-        nvcc_cmd.arg("-Xptxas").arg("-O3").arg("--use_fast_math");
-    } else {
-        nvcc_cmd.arg("-Xptxas").arg("-O3").arg("--use_fast_math");
-    }
-
-    let nvcc_status = nvcc_cmd.status().unwrap();
-
+        .status()
+        .unwrap();
     assert!(
         nvcc_status.success(),
         "Failed to compile CUDA source to PTX."
+    );
+
+    let nvcc_status = make_nvcc(cubin_file)
+        .arg(format!("-arch={}", "native"))
+        .arg("-cubin")
+        .arg("--maxrregcount=56")
+        .status()
+        .unwrap();
+    assert!(
+        nvcc_status.success(),
+        "Failed to compile CUDA source to CUBIN."
     );
 
     // The bindgen::Builder is the main entry point

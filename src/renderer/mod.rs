@@ -4,6 +4,7 @@ use crate::bindings::cuda::{
     ConeMarchTextureValue, RenderDataTextureValue, SdComposition, SdCubePrimitive,
     SdRuntimeSceneGeometry, SdSpherePrimitive, BLOCK_SIZE, CONE_MARCH_LEVELS, MAX_SUN_LIGHT_COUNT,
 };
+use crate::cudarc_extension::CustomCudaFunction;
 use bevy::core_pipeline::clear_color::ClearColorConfig;
 use bevy::reflect::Array;
 use bevy::render::extract_resource::ExtractResource;
@@ -11,6 +12,7 @@ use bevy::window::PrimaryWindow;
 use bevy::{prelude::*, render::render_resource::*};
 use cudarc::driver::{CudaDevice, CudaSlice, CudaStream, DevicePtr, LaunchAsync, LaunchConfig};
 use cudarc::nvrtc::Ptx;
+use std::ffi::CString;
 use std::sync::Arc;
 
 const MAX_COMPOSITION_NODE_COUNT: usize = 65536;
@@ -75,8 +77,13 @@ impl Default for RenderSceneGeometry {
 }
 
 struct RenderCudaContext {
+    #[allow(dead_code)]
     pub device: Arc<CudaDevice>,
     pub geometry_transferred_event: cudarc::driver::sys::CUevent,
+
+    pub func_compute_compressed_depth: CustomCudaFunction,
+    pub func_compute_render: CustomCudaFunction,
+    pub func_compute_render_finalize: CustomCudaFunction,
 }
 
 struct RenderCudaStreams {
@@ -142,6 +149,8 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
 
 // Render Systems
 
+const USE_PTX: bool = false;
+
 fn setup_cuda(world: &mut World) {
     let compression = RenderConeCompression::default();
 
@@ -155,18 +164,65 @@ fn setup_cuda(world: &mut World) {
 
     let start = std::time::Instant::now();
 
-    let ptx = Ptx::from_src(include_str!("../../assets/cuda/compiled/main.ptx"));
-    device
-        .load_ptx(
-            ptx,
-            "main",
-            &[
-                "compute_compressed_depth",
-                "compute_render",
-                "compute_render_finalize",
-            ],
-        )
-        .unwrap();
+    let func_compute_compressed_depth: CustomCudaFunction;
+    let func_compute_render: CustomCudaFunction;
+    let func_compute_render_finalize: CustomCudaFunction;
+    if USE_PTX {
+        let ptx = Ptx::from_src(include_str!("../../assets/cuda/compiled/main.ptx"));
+        device
+            .load_ptx(
+                ptx,
+                "main",
+                &[
+                    "compute_compressed_depth",
+                    "compute_render",
+                    "compute_render_finalize",
+                ],
+            )
+            .unwrap();
+
+        func_compute_compressed_depth = CustomCudaFunction::from_safe(
+            device.get_func("main", "compute_compressed_depth").unwrap(),
+            device.clone(),
+        );
+        func_compute_render = CustomCudaFunction::from_safe(
+            device.get_func("main", "compute_render").unwrap(),
+            device.clone(),
+        );
+        func_compute_render_finalize = CustomCudaFunction::from_safe(
+            device.get_func("main", "compute_render_finalize").unwrap(),
+            device.clone(),
+        );
+    } else {
+        let module = unsafe {
+            let src = include_bytes!("../../assets/cuda/compiled/main.cubin");
+            cudarc::driver::result::module::load_data(src.as_ptr() as *const _).unwrap()
+        };
+
+        func_compute_compressed_depth = unsafe {
+            let name = CString::new("compute_compressed_depth").unwrap();
+            CustomCudaFunction::from_sys(
+                cudarc::driver::result::module::get_function(module.clone(), name).unwrap(),
+                device.clone(),
+            )
+        };
+
+        func_compute_render = unsafe {
+            let name = CString::new("compute_render").unwrap();
+            CustomCudaFunction::from_sys(
+                cudarc::driver::result::module::get_function(module.clone(), name).unwrap(),
+                device.clone(),
+            )
+        };
+
+        func_compute_render_finalize = unsafe {
+            let name = CString::new("compute_render_finalize").unwrap();
+            CustomCudaFunction::from_sys(
+                cudarc::driver::result::module::get_function(module.clone(), name).unwrap(),
+                device.clone(),
+            )
+        };
+    }
 
     info!("CUDA PTX Loading took {:.2?} seconds", start.elapsed());
 
@@ -224,6 +280,9 @@ fn setup_cuda(world: &mut World) {
             cudarc::driver::sys::CUevent_flags_enum::CU_EVENT_DEFAULT,
         )
         .unwrap(),
+        func_compute_render,
+        func_compute_render_finalize,
+        func_compute_compressed_depth,
     });
     world.insert_non_send_resource(RenderCudaStreams { render_stream });
     world.insert_non_send_resource(RenderCudaBuffers {
@@ -464,9 +523,8 @@ fn render(
 
             unsafe {
                 render_context
-                    .device
-                    .get_func("main", "compute_compressed_depth")
-                    .unwrap()
+                    .func_compute_compressed_depth
+                    .clone()
                     .launch_on_stream(
                         &render_streams.render_stream,
                         LaunchConfig {
@@ -493,9 +551,8 @@ fn render(
     if let Some(render_parameters) = render_parameters {
         unsafe {
             render_context
-                .device
-                .get_func("main", "compute_render")
-                .unwrap()
+                .func_compute_render
+                .clone()
                 .launch_on_stream(
                     &render_streams.render_stream,
                     LaunchConfig {
@@ -522,9 +579,8 @@ fn render(
 
         unsafe {
             render_context
-                .device
-                .get_func("main", "compute_render_finalize")
-                .unwrap()
+                .func_compute_render_finalize
+                .clone()
                 .launch_on_stream(
                     &render_streams.render_stream,
                     LaunchConfig {
