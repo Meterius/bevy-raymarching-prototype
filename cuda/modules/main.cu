@@ -382,10 +382,11 @@ __device__ ivec2 render_texture_coord(ivec2 render_texture_size) {
     int warp_local_id = threadIdx.x % 32;
     ivec2 warp_local_coord = { warp_local_id % WARP_W, warp_local_id / WARP_W };
 
-    const int block_warp_count = 2;
+    const int BLOCK_WARP_H = 2;
+    const int BLOCK_WARP_W = (BLOCK_SIZE / BLOCK_WARP_H) / 32;
 
     int warp_id = threadIdx.x / 32;
-    ivec2 warp_coord = { warp_id % block_warp_count, warp_id / block_warp_count };
+    ivec2 warp_coord = { warp_id % BLOCK_WARP_W, warp_id / BLOCK_WARP_W };
 
     ivec2 block_local_texture_coord = {
         warp_local_coord.x + WARP_W * warp_coord.x,
@@ -393,13 +394,13 @@ __device__ ivec2 render_texture_coord(ivec2 render_texture_size) {
     };
 
     ivec2 block_count = {
-        render_texture_size.x / (WARP_W * block_warp_count),
-        render_texture_size.x / (WARP_H * block_warp_count),
+        render_texture_size.x / (WARP_W * BLOCK_WARP_W),
+        render_texture_size.x / (WARP_H * BLOCK_WARP_H),
     };
 
     ivec2 block_texture_coord = {
-        (WARP_W * block_warp_count) * (blockIdx.x % block_count.x),
-        (WARP_H * block_warp_count) * (blockIdx.x / block_count.x)
+        (WARP_W * BLOCK_WARP_W) * (blockIdx.x % block_count.x),
+        (WARP_H * BLOCK_WARP_H) * (blockIdx.x / block_count.x)
     };
 
     return block_texture_coord + block_local_texture_coord;

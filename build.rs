@@ -1,6 +1,5 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use std::ops::Deref;
 use std::path::PathBuf;
 use syn::{parse_file, Attribute, Item, Meta};
 
@@ -91,7 +90,8 @@ fn compile_cuda() {
         .arg(&ptx_file)
         .arg(&cuda_src)
         .arg(format!("-arch={}", arch))
-        .arg(format!("-code={}", code));
+        .arg(format!("-code={}", code))
+        .arg("-maxrregcount=70");
 
     if cfg!(debug_assertions) {
         warn!("Running NVCC in debug mode");
@@ -127,17 +127,16 @@ fn compile_cuda() {
         // Unwrap the Result and panic on failure.
         .expect("Unable to generate bindings");
 
-    // we need to make modifications to the generated code
-    let generated_bindings = bindings.to_string();
-
     // Regex to find raw pointers to float and replace them with CudaSlice<f32>
     // You can copy this regex to add/modify other types of pointers, for example "*mut i32"
-    let modified_bindings = generated_bindings;
-    let modified_bindings = String::from("#![allow(warnings)]\n") + modified_bindings.deref();
-    let modified_bindings = add_derive_extensions_to_structs(
-        modified_bindings.as_str(),
-        &["SdSpherePrimitive", "SdCubePrimitive", "SdComposition"],
-        &["Default", "bevy::prelude::Reflect"],
+    let mut modified_bindings = String::from("#![allow(warnings)]\n\n");
+    modified_bindings.push_str(
+        add_derive_extensions_to_structs(
+            bindings.to_string().as_str(),
+            &["SdSpherePrimitive", "SdCubePrimitive", "SdComposition"],
+            &["Default", "bevy::prelude::Reflect"],
+        )
+        .as_str(),
     );
 
     // Write the bindings to the $OUT_DIR/bindings.rs file.

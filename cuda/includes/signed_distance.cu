@@ -96,8 +96,7 @@ struct RuntimeStackNode {
     int child_index;
 };
 
-#define BLOCK_DIM 128
-#define SD_RUNTIME_STACK_MAX_DEPTH 20
+#define SD_RUNTIME_STACK_MAX_DEPTH 48
 
 //__shared__ RuntimeStackNode sd_runtime_stack[SD_RUNTIME_STACK_MAX_DEPTH * BLOCK_DIM];
 
@@ -106,124 +105,110 @@ __device__ float sd_composition(
     SdRuntimeSceneGeometry geometry,
     int composition_index
 ) {
-    unsigned int stack_index = 0;
+    int stack_index = 0;
     int index = composition_index;
     float sd = 0.0f;
 
     RuntimeStackNode sd_runtime_stack[SD_RUNTIME_STACK_MAX_DEPTH];
     sd_runtime_stack[stack_index] = { p, MAX_POSITIVE_F32, geometry.compositions[index].child_leftmost };
 
-    while (true) {
+    while (stack_index >= 0) {
         assert(stack_index >= 0);
         assert(stack_index < SD_RUNTIME_STACK_MAX_DEPTH);
 
-        SdComposition node = geometry.compositions[index];
-        RuntimeStackNode stack_node = sd_runtime_stack[stack_index];
+        SdComposition *node = &geometry.compositions[index];
+        RuntimeStackNode *stack_node = &sd_runtime_stack[stack_index];
 
-        vec3 position = stack_node.position;
+        vec3 position = stack_node->position;
 
         float bound_distance = max(
             max(
-                node.bound_min[0] - position.x,
-                max(node.bound_min[1] - position.y, node.bound_min[2] - position.z)
+                node->bound_min[0] - position.x,
+                max(node->bound_min[1] - position.y, node->bound_min[2] - position.z)
             ),
             max(
-                position.x - node.bound_max[0],
-                max(position.y - node.bound_max[1], position.z - node.bound_max[2])
+                position.x - node->bound_max[0],
+                max(position.y - node->bound_max[1], position.z - node->bound_max[2])
             )
         );
 
         if (bound_distance > collision_distance[threadIdx.x]) {
             sd = bound_distance;
 
-            if (index == composition_index) {
-                break;
-            }
-
-            index = node.parent;
+            index = node->parent;
             stack_index -= 1;
-
-            continue;
-        }
-
-        switch (node.variant) {
-            case SdCompositionVariant::Union:
-            case SdCompositionVariant::Difference:
-                break;
-        }
-
-        if (node.primitive_variant != SdPrimitiveVariant::None) {
-            float rev_scale;
-
-            switch (node.primitive_variant) {
-                case SdPrimitiveVariant::None:
-                    break;
-
-                case SdPrimitiveVariant::Sphere:
-                    rev_scale = minimum(from_array(geometry.sphere_primitives[node.primitive].scale));
-                    sd = sd_unit_sphere(
-                        (position - from_array(geometry.sphere_primitives[node.primitive].translation))
-                        / from_array(geometry.sphere_primitives[node.primitive].scale)
-                    ) * rev_scale;
-                    break;
-
-                case SdPrimitiveVariant::Cube:
-                    rev_scale = minimum(from_array(geometry.cube_primitives[node.primitive].scale));
-                    sd = sd_unit_cube(
-                        (position - from_array(geometry.cube_primitives[node.primitive].translation))
-                        / from_array(geometry.cube_primitives[node.primitive].scale)
-                    ) * rev_scale;
-                    break;
-            }
-
-            switch (node.variant) {
+        } else {
+            switch (node->variant) {
                 case SdCompositionVariant::Union:
                 case SdCompositionVariant::Difference:
                     break;
             }
 
-            if (index == composition_index) {
-                break;
-            }
+            if (node->primitive_variant != SdPrimitiveVariant::None) {
+                float rev_scale;
 
-            index = node.parent;
-            stack_index -= 1;
-        } else {
-            if (stack_node.child_index != node.child_leftmost) {
-                switch (node.variant) {
-                    case SdCompositionVariant::Difference:
-                        sd_runtime_stack[stack_index].sd = max(sd_runtime_stack[stack_index].sd, -sd);
+                switch (node->primitive_variant) {
+                    case SdPrimitiveVariant::None:
                         break;
 
+                    case SdPrimitiveVariant::Sphere:
+                        rev_scale = minimum(from_array(geometry.sphere_primitives[node->primitive].scale));
+                        sd = sd_unit_sphere(
+                            (position - from_array(geometry.sphere_primitives[node->primitive].translation))
+                            / from_array(geometry.sphere_primitives[node->primitive].scale)
+                        ) * rev_scale;
+                        break;
+
+                    case SdPrimitiveVariant::Cube:
+                        rev_scale = minimum(from_array(geometry.cube_primitives[node->primitive].scale));
+                        sd = sd_unit_cube(
+                            (position - from_array(geometry.cube_primitives[node->primitive].translation))
+                            / from_array(geometry.cube_primitives[node->primitive].scale)
+                        ) * rev_scale;
+                        break;
+                }
+
+                switch (node->variant) {
                     case SdCompositionVariant::Union:
-                        sd_runtime_stack[stack_index].sd = min(sd_runtime_stack[stack_index].sd, sd);
-                        break;
-                }
-            }
-
-            if (stack_node.child_index > node.child_rightmost) {
-                sd = sd_runtime_stack[stack_index].sd;
-
-                switch (node.variant) {
-                    case SdCompositionVariant::Union:
                     case SdCompositionVariant::Difference:
                         break;
                 }
 
-                if (index == composition_index) {
-                    break;
-                }
-
-                index = node.parent;
+                index = node->parent;
                 stack_index -= 1;
             } else {
-                index = sd_runtime_stack[stack_index].child_index;
-                sd_runtime_stack[stack_index].child_index += 1;
+                if (stack_node->child_index != node->child_leftmost) {
+                    switch (node->variant) {
+                        case SdCompositionVariant::Difference:
+                            sd_runtime_stack[stack_index].sd = max(sd_runtime_stack[stack_index].sd, -sd);
+                            break;
 
-                stack_index += 1;
-                sd_runtime_stack[stack_index] = {
-                    position, MAX_POSITIVE_F32, geometry.compositions[index].child_leftmost
-                };
+                        case SdCompositionVariant::Union:
+                            sd_runtime_stack[stack_index].sd = min(sd_runtime_stack[stack_index].sd, sd);
+                            break;
+                    }
+                }
+
+                if (stack_node->child_index > node->child_rightmost) {
+                    sd = sd_runtime_stack[stack_index].sd;
+
+                    switch (node->variant) {
+                        case SdCompositionVariant::Union:
+                        case SdCompositionVariant::Difference:
+                            break;
+                    }
+
+                    index = node->parent;
+                    stack_index -= 1;
+                } else {
+                    index = sd_runtime_stack[stack_index].child_index;
+                    sd_runtime_stack[stack_index].child_index += 1;
+
+                    stack_index += 1;
+                    sd_runtime_stack[stack_index] = {
+                        position, MAX_POSITIVE_F32, geometry.compositions[index].child_leftmost
+                    };
+                }
             }
         }
     }

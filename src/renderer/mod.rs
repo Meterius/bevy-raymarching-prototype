@@ -2,8 +2,7 @@ pub mod scene;
 
 use crate::bindings::cuda::{
     ConeMarchTextureValue, RenderDataTextureValue, SdComposition, SdCubePrimitive,
-    SdPrimitiveVariant_None, SdPrimitiveVariant_Sphere, SdRuntimeSceneGeometry, SdSpherePrimitive,
-    CONE_MARCH_LEVELS, MAX_SUN_LIGHT_COUNT,
+    SdRuntimeSceneGeometry, SdSpherePrimitive, BLOCK_SIZE, CONE_MARCH_LEVELS, MAX_SUN_LIGHT_COUNT,
 };
 use bevy::core_pipeline::clear_color::ClearColorConfig;
 use bevy::render::extract_resource::ExtractResource;
@@ -14,13 +13,11 @@ use cudarc::nvrtc::Ptx;
 use nvtx::mark;
 use std::sync::Arc;
 
-const MAX_COMPOSITION_NODE_COUNT: usize = 8162;
-const MAX_CUBE_NODE_COUNT: usize = 4096;
-const MAX_SPHERE_NODE_COUNT: usize = 4096;
+const MAX_COMPOSITION_NODE_COUNT: usize = 65536;
+const MAX_CUBE_NODE_COUNT: usize = 65536;
+const MAX_SPHERE_NODE_COUNT: usize = 65536;
 
 const RENDER_TEXTURE_SIZE: (usize, usize) = (2560, 1440);
-
-const CUDA_GPU_BLOCK_SIZE: usize = 128;
 
 #[derive(Debug, Clone, Default, Resource, Reflect)]
 #[reflect(Resource)]
@@ -39,7 +36,7 @@ impl Default for RenderConeCompression {
     fn default() -> Self {
         Self {
             enabled: true,
-            levels: [16, 8, 4, 2],
+            levels: [16, 4],
         }
     }
 }
@@ -434,7 +431,7 @@ fn render(
         for i in 0..CONE_MARCH_LEVELS as u32 {
             let grid_size = ((cm_textures.textures[i as usize].size[0]
                 * cm_textures.textures[i as usize].size[0]) as f32
-                / CUDA_GPU_BLOCK_SIZE as f32)
+                / BLOCK_SIZE as usize as f32)
                 .ceil() as u32;
 
             unsafe {
@@ -449,7 +446,7 @@ fn render(
                             &render_streams.render_stream
                         },
                         LaunchConfig {
-                            block_dim: (CUDA_GPU_BLOCK_SIZE as u32, 1, 1),
+                            block_dim: (BLOCK_SIZE as usize as u32, 1, 1),
                             grid_dim: (grid_size, 1, 1),
                             shared_mem_bytes: 0,
                         },
@@ -482,10 +479,10 @@ fn render(
                 .launch_on_stream(
                     &render_streams.render_stream,
                     LaunchConfig {
-                        block_dim: (CUDA_GPU_BLOCK_SIZE as u32, 1, 1),
+                        block_dim: (BLOCK_SIZE as usize as u32, 1, 1),
                         grid_dim: (
                             (RENDER_TEXTURE_SIZE.1 as u32 * RENDER_TEXTURE_SIZE.0 as u32)
-                                / (CUDA_GPU_BLOCK_SIZE as u32),
+                                / (BLOCK_SIZE as usize as u32),
                             1,
                             1,
                         ),
@@ -511,10 +508,10 @@ fn render(
                 .launch_on_stream(
                     &render_streams.render_stream,
                     LaunchConfig {
-                        block_dim: (CUDA_GPU_BLOCK_SIZE as u32, 1, 1),
+                        block_dim: (BLOCK_SIZE as usize as u32, 1, 1),
                         grid_dim: (
                             (RENDER_TEXTURE_SIZE.1 as u32 * RENDER_TEXTURE_SIZE.0 as u32)
-                                / (CUDA_GPU_BLOCK_SIZE as u32),
+                                / (BLOCK_SIZE as usize as u32),
                             1,
                             1,
                         ),

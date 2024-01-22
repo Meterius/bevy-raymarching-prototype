@@ -10,7 +10,7 @@ using namespace glm;
 #define RAY_MARCH_DEPTH_LIMIT 1000.0f
 #define RAY_MARCH_COLLISION_DISTANCE 0.001f
 
-__shared__ float collision_distance[128];
+__shared__ float collision_distance[BLOCK_SIZE];
 
 template<bool useConeMarch, typename SdSceneFunc>
 __device__ RayMarchHit ray_march(

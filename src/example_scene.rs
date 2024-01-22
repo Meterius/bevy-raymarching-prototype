@@ -3,28 +3,45 @@ use crate::renderer::RenderCameraTarget;
 use bevy::prelude::*;
 use bevy_flycam::FlyCam;
 
-const SAMPLE_SPHERE_DISTANCE: f32 = 200.0;
+const SAMPLE_SPHERE_DISTANCE: f32 = 20.0;
+const SAMPLE_SPHERE_CHUNK_DISTANCE: f32 = 200.0;
 
 pub fn setup_scene(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    for i in 0..2048 {
-        commands.spawn((
-            PbrBundle {
-                mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
-                material: materials.add(Color::rgb_u8(124, 144, 255).into()),
-                transform: Transform::from_xyz(
-                    rand::random::<f32>() * SAMPLE_SPHERE_DISTANCE - SAMPLE_SPHERE_DISTANCE * 0.5,
-                    rand::random::<f32>() * SAMPLE_SPHERE_DISTANCE - SAMPLE_SPHERE_DISTANCE * 0.5,
-                    rand::random::<f32>() * SAMPLE_SPHERE_DISTANCE - SAMPLE_SPHERE_DISTANCE * 0.5,
-                ),
-                ..default()
-            },
-            SdPrimitive::Sphere(0.5),
-            SdVisual::default(),
-        ));
+    for _ in 0..32 {
+        let base = Vec3::new(
+            rand::random::<f32>() * SAMPLE_SPHERE_CHUNK_DISTANCE
+                - SAMPLE_SPHERE_CHUNK_DISTANCE * 0.5,
+            rand::random::<f32>() * SAMPLE_SPHERE_CHUNK_DISTANCE
+                - SAMPLE_SPHERE_CHUNK_DISTANCE * 0.5,
+            rand::random::<f32>() * SAMPLE_SPHERE_CHUNK_DISTANCE
+                - SAMPLE_SPHERE_CHUNK_DISTANCE * 0.5,
+        );
+
+        for _ in 0..64 {
+            commands.spawn((
+                PbrBundle {
+                    mesh: meshes.add(Mesh::from(shape::Cube { size: 0.5 })),
+                    material: materials.add(Color::rgb_u8(124, 144, 255).into()),
+                    transform: Transform::from_translation(
+                        base + Vec3::new(
+                            rand::random::<f32>() * SAMPLE_SPHERE_DISTANCE
+                                - SAMPLE_SPHERE_DISTANCE * 0.5,
+                            rand::random::<f32>() * SAMPLE_SPHERE_DISTANCE
+                                - SAMPLE_SPHERE_DISTANCE * 0.5,
+                            rand::random::<f32>() * SAMPLE_SPHERE_DISTANCE
+                                - SAMPLE_SPHERE_DISTANCE * 0.5,
+                        ),
+                    ),
+                    ..default()
+                },
+                SdPrimitive::Sphere(0.25),
+                SdVisual::default(),
+            ));
+        }
     }
 
     // light

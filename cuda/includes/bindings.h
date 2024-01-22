@@ -1,9 +1,10 @@
 #pragma once
 
-#define CONE_MARCH_LEVELS 4
+#define CONE_MARCH_LEVELS 2
 #define MAX_SUN_LIGHT_COUNT 1
 #define MAX_POINT_LIGHT_COUNT 1
 #define MAX_COMPOSITION_NODE_COUNT 4096
+#define BLOCK_SIZE 128
 // #define DISABLE_CONE_MARCH
 
 enum RayMarchHitOutcome {

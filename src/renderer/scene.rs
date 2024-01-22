@@ -129,6 +129,7 @@ impl SdCompositionNode {
     }
 }
 
+#[allow(dead_code)]
 fn simple_bvh_reordering(node: &mut SdCompositionNode) {
     match node.variant {
         SdCompositionNodeVariant::Union => {}
@@ -230,6 +231,7 @@ fn simple_center_split_reordering(node: &mut SdCompositionNode) {
     }
 }
 
+#[allow(dead_code)]
 fn simple_paired_reordering(node: &mut SdCompositionNode) {
     match node.variant {
         SdCompositionNodeVariant::Union => {}
