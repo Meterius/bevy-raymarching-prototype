@@ -61,13 +61,14 @@ impl Plugin for RenderScenePlugin {
 
 //
 
-#[derive(Debug)]
+#[derive(Default, Debug)]
 pub enum SdPrimitiveNodeVariant {
+    #[default]
     Sphere,
     Cube,
 }
 
-#[derive(Debug)]
+#[derive(Default, Debug)]
 pub struct SdPrimitiveNode {
     variant: SdPrimitiveNodeVariant,
     translation: Vec3,
@@ -88,9 +89,10 @@ impl SdPrimitiveNode {
     }
 }
 
-#[derive(Debug)]
+#[derive(Default, Debug)]
 pub enum SdCompositionNodeVariant {
     Primitive,
+    #[default]
     Union,
     Difference,
 }
@@ -101,6 +103,30 @@ pub struct SdCompositionNode {
     primitive: Option<SdPrimitiveNode>,
     children: Vec<SdCompositionNode>,
     bounding_box: (Vec3, Vec3),
+}
+
+impl Default for SdCompositionNode {
+    fn default() -> Self {
+        Self {
+            variant: SdCompositionNodeVariant::Union,
+            primitive: None,
+            children: Vec::new(),
+            bounding_box: (Vec3::INFINITY, Vec3::NEG_INFINITY),
+        }
+    }
+}
+
+impl SdCompositionNode {
+    fn depth(&self) -> usize {
+        return 1 + self
+            .children
+            .iter()
+            .fold(0, |x, child| x.max(child.depth()));
+    }
+
+    fn total(&self) -> usize {
+        return self.children.iter().fold(1, |x, child| x + child.total());
+    }
 }
 
 fn simple_bvh_reordering(node: &mut SdCompositionNode) {
@@ -152,12 +178,88 @@ fn simple_bvh_reordering(node: &mut SdCompositionNode) {
     }
 }
 
-fn fill_scene_geometry_non_leaf_bounding_boxes(node: &mut SdCompositionNode) {
-    node.children
-        .iter_mut()
-        .for_each(|child| fill_scene_geometry_non_leaf_bounding_boxes(child));
+fn simple_center_split_reordering(node: &mut SdCompositionNode) {
+    if node.children.len() <= 2 {
+        return;
+    }
 
-    if node.children.len() != 0 {
+    let mut axis = 0;
+
+    if node.bounding_box.1[axis] - node.bounding_box.0[axis]
+        < node.bounding_box.1[1] - node.bounding_box.0[1]
+    {
+        axis = 1;
+    }
+
+    if node.bounding_box.1[axis] - node.bounding_box.0[axis]
+        < node.bounding_box.1[2] - node.bounding_box.0[2]
+    {
+        axis = 2;
+    }
+
+    let mut child_left = SdCompositionNode::default();
+    let mut child_right = SdCompositionNode::default();
+
+    let center = (node.bounding_box.0[axis] + node.bounding_box.1[axis]) / 2.0;
+
+    let mut prev_children = Vec::new();
+
+    std::mem::swap(&mut prev_children, &mut node.children);
+
+    for child in prev_children.into_iter() {
+        if (child.bounding_box.1[axis] + child.bounding_box.0[axis]) / 2.0 > center {
+            child_left.children.push(child);
+        } else {
+            child_right.children.push(child);
+        }
+    }
+
+    // only insert children if both are non-empty, if one of them is empty bounding boxes were all aligned and cannot be split
+    if child_left.children.len() == 0 {
+        std::mem::swap(&mut node.children, &mut child_right.children);
+    } else if child_right.children.len() == 0 {
+        std::mem::swap(&mut node.children, &mut child_left.children);
+    } else {
+        node.children.push(child_left);
+        node.children.push(child_right);
+    }
+
+    for child in node.children.iter_mut() {
+        fill_scene_geometry_node_bounding_boxes(child);
+        simple_center_split_reordering(child);
+    }
+}
+
+fn simple_paired_reordering(node: &mut SdCompositionNode) {
+    match node.variant {
+        SdCompositionNodeVariant::Union => {}
+        _ => {
+            return;
+        }
+    };
+
+    while node.children.len() > 2 {
+        for i in 0..node.children.len() / 2 {
+            let child1 = node.children.remove(node.children.len() - 1 - i);
+            let child2 = node.children.remove(node.children.len() - 1 - i);
+
+            node.children.push(SdCompositionNode {
+                variant: SdCompositionNodeVariant::Union,
+                primitive: None,
+                bounding_box: (
+                    child1.bounding_box.0.min(child2.bounding_box.0),
+                    child1.bounding_box.1.max(child2.bounding_box.1),
+                ),
+                children: vec![child1, child2],
+            });
+        }
+    }
+}
+
+fn fill_scene_geometry_node_bounding_boxes(node: &mut SdCompositionNode) {
+    if let Some(primitive) = node.primitive.as_ref() {
+        node.bounding_box = primitive.bounding_box();
+    } else {
         let mut bounding_box = (Vec3::INFINITY, Vec3::NEG_INFINITY);
 
         node.children.iter_mut().for_each(|child| {
@@ -167,6 +269,14 @@ fn fill_scene_geometry_non_leaf_bounding_boxes(node: &mut SdCompositionNode) {
 
         node.bounding_box = bounding_box;
     }
+}
+
+fn fill_scene_geometry_non_leaf_bounding_boxes(node: &mut SdCompositionNode) {
+    node.children
+        .iter_mut()
+        .for_each(|child| fill_scene_geometry_non_leaf_bounding_boxes(child));
+
+    fill_scene_geometry_node_bounding_boxes(node);
 }
 
 fn collect_scene_geometry(
@@ -225,6 +335,8 @@ fn draw_bb_gizmos(gizmos: &mut Gizmos, node: &SdCompositionNode) {
     })
 }
 
+const PRINT_COMPILE_SCENE_GEOMETRY_INFO: bool = false;
+
 fn compile_scene_geometry(
     settings: Res<RenderSceneSettings>,
     mut gizmos: Gizmos,
@@ -236,6 +348,8 @@ fn compile_scene_geometry(
         Option<&SdVisual>,
     )>,
 ) {
+    let start = std::time::Instant::now();
+
     let mut cube_index: usize = 0;
     let mut sphere_index: usize = 0;
 
@@ -244,7 +358,17 @@ fn compile_scene_geometry(
 
     let mut root = collect_scene_geometry(&mut nodes);
     fill_scene_geometry_non_leaf_bounding_boxes(&mut root);
-    simple_bvh_reordering(&mut root);
+    simple_center_split_reordering(&mut root);
+    let root_depth = if PRINT_COMPILE_SCENE_GEOMETRY_INFO {
+        root.depth()
+    } else {
+        0
+    };
+    let root_count = if PRINT_COMPILE_SCENE_GEOMETRY_INFO {
+        root.total()
+    } else {
+        0
+    };
 
     if settings.enable_debug_gizmos {
         draw_bb_gizmos(&mut gizmos, &root);
@@ -304,5 +428,16 @@ fn compile_scene_geometry(
                 .map(|x| (composition_index as i32, x)),
         );
         composition_index += 1;
+    }
+
+    if PRINT_COMPILE_SCENE_GEOMETRY_INFO {
+        info!(
+            "Scene Compilation Took {:.2}ms",
+            1000.0 * start.elapsed().as_secs_f32()
+        );
+        info!(
+            "Scene Composition Depth {} And Count {}",
+            root_depth, root_count
+        );
     }
 }

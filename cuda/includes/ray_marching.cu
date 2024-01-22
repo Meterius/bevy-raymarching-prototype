@@ -10,6 +10,8 @@ using namespace glm;
 #define RAY_MARCH_DEPTH_LIMIT 1000.0f
 #define RAY_MARCH_COLLISION_DISTANCE 0.001f
 
+__shared__ float collision_distance[128];
+
 template<bool useConeMarch, typename SdSceneFunc>
 __device__ RayMarchHit ray_march(
     SdSceneFunc sd_scene,
@@ -24,10 +26,14 @@ __device__ RayMarchHit ray_march(
         StepLimit
     };
 
-    if (false && starting.outcome == DepthLimit) {
+    collision_distance[threadIdx.x] = RAY_MARCH_COLLISION_DISTANCE;
+
+    if (starting.outcome == DepthLimit) {
         hit.outcome = starting.outcome;
     } else {
         for (; hit.steps < RAY_MARCH_STEP_LIMIT; hit.steps++) {
+            collision_distance[threadIdx.x] = cone_radius_at_unit * hit.depth;
+
             float d = sd_scene(hit.position);
 
             if (useConeMarch) {

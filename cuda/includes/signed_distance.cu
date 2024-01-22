@@ -3,6 +3,8 @@
 #include "../includes/libraries/glm/glm.hpp"
 #include "../includes/types.cu"
 #include "../includes/utils.h"
+#include "../includes/ray_marching.cu"
+#include <assert.h>
 
 using namespace glm;
 
@@ -53,15 +55,15 @@ __device__ float sd_mandelbulb(vec3 p, float time) {
 // primitives
 
 __device__ float sd_unit_sphere(vec3 p) {
-    return length(p) - 0.5f;
+    return length(p) - 1.0;
 }
 
 __device__ float sd_unit_cube(vec3 p) {
     return max(
-        max(p.x - 0.5f, 0.5f - p.x),
+        max(p.x - 1.0f, 1.0f - p.x),
         max(
-            max(p.y - 0.5f, 0.5f - p.y),
-            max(p.z - 0.5f, 0.5f - p.z)
+            max(p.y - 1.0f, 1.0f - p.y),
+            max(p.z - 1.0f, 1.0f - p.z)
         )
     );
 }
@@ -95,22 +97,26 @@ struct RuntimeStackNode {
 };
 
 #define BLOCK_DIM 128
-#define SD_RUNTIME_STACK_MAX_DEPTH 12
+#define SD_RUNTIME_STACK_MAX_DEPTH 20
 
-__shared__ RuntimeStackNode sd_runtime_stack[SD_RUNTIME_STACK_MAX_DEPTH * BLOCK_DIM];
+//__shared__ RuntimeStackNode sd_runtime_stack[SD_RUNTIME_STACK_MAX_DEPTH * BLOCK_DIM];
 
 __device__ float sd_composition(
     vec3 p,
     SdRuntimeSceneGeometry geometry,
     int composition_index
 ) {
-    unsigned int stack_index = threadIdx.x;
+    unsigned int stack_index = 0;
     int index = composition_index;
     float sd = 0.0f;
 
+    RuntimeStackNode sd_runtime_stack[SD_RUNTIME_STACK_MAX_DEPTH];
     sd_runtime_stack[stack_index] = { p, MAX_POSITIVE_F32, geometry.compositions[index].child_leftmost };
 
     while (true) {
+        assert(stack_index >= 0);
+        assert(stack_index < SD_RUNTIME_STACK_MAX_DEPTH);
+
         SdComposition node = geometry.compositions[index];
         RuntimeStackNode stack_node = sd_runtime_stack[stack_index];
 
@@ -127,7 +133,7 @@ __device__ float sd_composition(
             )
         );
 
-        if (bound_distance > 1.0) {
+        if (bound_distance > collision_distance[threadIdx.x]) {
             sd = bound_distance;
 
             if (index == composition_index) {
@@ -135,7 +141,7 @@ __device__ float sd_composition(
             }
 
             index = node.parent;
-            stack_index -= BLOCK_DIM;
+            stack_index -= 1;
 
             continue;
         }
@@ -181,7 +187,7 @@ __device__ float sd_composition(
             }
 
             index = node.parent;
-            stack_index -= BLOCK_DIM;
+            stack_index -= 1;
         } else {
             if (stack_node.child_index != node.child_leftmost) {
                 switch (node.variant) {
@@ -209,12 +215,12 @@ __device__ float sd_composition(
                 }
 
                 index = node.parent;
-                stack_index -= BLOCK_DIM;
+                stack_index -= 1;
             } else {
                 index = sd_runtime_stack[stack_index].child_index;
                 sd_runtime_stack[stack_index].child_index += 1;
 
-                stack_index += BLOCK_DIM;
+                stack_index += 1;
                 sd_runtime_stack[stack_index] = {
                     position, MAX_POSITIVE_F32, geometry.compositions[index].child_leftmost
                 };

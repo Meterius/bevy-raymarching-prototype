@@ -3,17 +3,23 @@ use crate::renderer::RenderCameraTarget;
 use bevy::prelude::*;
 use bevy_flycam::FlyCam;
 
+const SAMPLE_SPHERE_DISTANCE: f32 = 200.0;
+
 pub fn setup_scene(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    for i in 0..512 {
+    for i in 0..2048 {
         commands.spawn((
             PbrBundle {
                 mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
                 material: materials.add(Color::rgb_u8(124, 144, 255).into()),
-                transform: Transform::from_xyz(-4.0 + (i as f32) * -1.0, 0.5, 0.0),
+                transform: Transform::from_xyz(
+                    rand::random::<f32>() * SAMPLE_SPHERE_DISTANCE - SAMPLE_SPHERE_DISTANCE * 0.5,
+                    rand::random::<f32>() * SAMPLE_SPHERE_DISTANCE - SAMPLE_SPHERE_DISTANCE * 0.5,
+                    rand::random::<f32>() * SAMPLE_SPHERE_DISTANCE - SAMPLE_SPHERE_DISTANCE * 0.5,
+                ),
                 ..default()
             },
             SdPrimitive::Sphere(0.5),

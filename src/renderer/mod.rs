@@ -14,9 +14,9 @@ use cudarc::nvrtc::Ptx;
 use nvtx::mark;
 use std::sync::Arc;
 
-const MAX_COMPOSITION_NODE_COUNT: usize = 4096;
-const MAX_CUBE_NODE_COUNT: usize = 2048;
-const MAX_SPHERE_NODE_COUNT: usize = 2048;
+const MAX_COMPOSITION_NODE_COUNT: usize = 8162;
+const MAX_CUBE_NODE_COUNT: usize = 4096;
+const MAX_SPHERE_NODE_COUNT: usize = 4096;
 
 const RENDER_TEXTURE_SIZE: (usize, usize) = (2560, 1440);
 
