@@ -594,7 +594,7 @@ extern "C" __global__ void compute_render_finalize(
     if (texture_value.outcome == Collision) {
         color = from_array(texture_value.color) * texture_value.light * (2.0f + vec3(texture_value.steps * 0.01f)) +
                 vec3(texture_value.depth * 0.0001f);
-        color = vec3(texture_value.depth * 0.005f);
+        color = vec3(texture_value.depth * 0.00005f);
     } else if (texture_value.outcome == DepthLimit) {
         color = vec3(vec3(0.2f, 0.4f, 1.0f) * 3.0f * 0.0f + texture_value.steps * 0.01f);
         color = vec3(4.0f);

@@ -1,5 +1,5 @@
 use crate::bindings::cuda;
-use crate::renderer::{render, RenderSceneGeometry};
+use crate::renderer::{RenderCudaContext, RenderSceneGeometry};
 use bevy::prelude::*;
 use std::collections::VecDeque;
 
@@ -53,7 +53,7 @@ impl Plugin for RenderScenePlugin {
             .register_type::<SdVisual>()
             .register_type::<RenderSceneSettings>()
             .insert_resource(RenderSceneSettings {
-                enable_debug_gizmos: true,
+                enable_debug_gizmos: false,
             })
             .add_systems(PostUpdate, (compile_scene_geometry,));
     }
@@ -282,12 +282,15 @@ fn fill_scene_geometry_non_leaf_bounding_boxes(node: &mut SdCompositionNode) {
 }
 
 fn collect_scene_geometry(
-    mut nodes: &mut Query<(
-        &GlobalTransform,
-        Option<&SdPrimitive>,
-        Option<&SdComposition>,
-        Option<&SdVisual>,
-    )>,
+    nodes: &Query<
+        (
+            &GlobalTransform,
+            Option<&SdPrimitive>,
+            Option<&SdComposition>,
+            Option<&SdVisual>,
+        ),
+        Or<(With<SdPrimitive>, With<SdComposition>)>,
+    >,
 ) -> SdCompositionNode {
     let mut primitives = Vec::new();
 
@@ -341,15 +344,38 @@ const PRINT_COMPILE_SCENE_GEOMETRY_INFO: bool = false;
 
 fn compile_scene_geometry(
     settings: Res<RenderSceneSettings>,
+    render_context: NonSend<RenderCudaContext>,
     mut gizmos: Gizmos,
-    mut geometry: ResMut<RenderSceneGeometry>,
-    mut nodes: Query<(
-        &GlobalTransform,
-        Option<&SdPrimitive>,
-        Option<&SdComposition>,
-        Option<&SdVisual>,
-    )>,
+    mut geometry: NonSendMut<RenderSceneGeometry>,
+    mut nodes: Query<
+        (
+            &GlobalTransform,
+            Option<&SdPrimitive>,
+            Option<&SdComposition>,
+            Option<&SdVisual>,
+        ),
+        Or<(With<SdPrimitive>, With<SdComposition>)>,
+    >,
+    changed_nodes: Query<
+        Entity,
+        (
+            Or<(
+                Changed<GlobalTransform>,
+                Changed<SdPrimitive>,
+                Changed<SdComposition>,
+                Changed<SdVisual>,
+            )>,
+            Or<(With<SdPrimitive>, With<SdComposition>)>,
+        ),
+    >,
 ) {
+    if changed_nodes.is_empty() {
+        nvtx::mark!("Skipped Geometry Compilation");
+        return;
+    }
+
+    let range_id = nvtx::range_start!("Compile Geometry");
+
     let start = std::time::Instant::now();
 
     let mut cube_index: usize = 0;
@@ -358,9 +384,16 @@ fn compile_scene_geometry(
     let mut composition_index: usize = 0;
     let mut composition_children_index: usize = 1;
 
+    let sub_range_id = nvtx::range_start!("Compile Geometry - Collect");
     let mut root = collect_scene_geometry(&mut nodes);
+    nvtx::range_end!(sub_range_id);
+
     fill_scene_geometry_non_leaf_bounding_boxes(&mut root);
+
+    let sub_range_id = nvtx::range_start!("Compile Geometry - BVH");
     simple_center_split_reordering(&mut root);
+    nvtx::range_end!(sub_range_id);
+
     let root_depth = if PRINT_COMPILE_SCENE_GEOMETRY_INFO {
         root.depth()
     } else {
@@ -375,6 +408,14 @@ fn compile_scene_geometry(
     if settings.enable_debug_gizmos {
         draw_bb_gizmos(&mut gizmos, &root);
     }
+
+    // store compiled geometry
+
+    unsafe {
+        cudarc::driver::sys::cuEventSynchronize(render_context.geometry_transferred_event.clone())
+            .result()
+            .unwrap()
+    };
 
     let mut queue = VecDeque::new();
     queue.push_back((-1, root));
@@ -442,4 +483,6 @@ fn compile_scene_geometry(
             root_depth, root_count
         );
     }
+
+    nvtx::range_end!(range_id);
 }

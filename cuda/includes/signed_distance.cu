@@ -58,21 +58,33 @@ __device__ float sd_unit_sphere(vec3 p) {
     return length(p) - 1.0;
 }
 
-__device__ float sd_unit_cube(vec3 p) {
-    return max(
-        max(p.x - 1.0f, 1.0f - p.x),
-        max(
-            max(p.y - 1.0f, 1.0f - p.y),
-            max(p.z - 1.0f, 1.0f - p.z)
-        )
-    );
-}
-
 __device__ float sd_box(vec3 p, vec3 bp, vec3 bs) {
     vec3 q = abs(p - bp) - bs / 2.0f;
     float udst = length(max(q, vec3(0.0f)));
     float idst = maximum(min(q, vec3(0.0f)));
     return udst + idst;
+}
+
+__device__ float sd_simple_box(vec3 p, vec3 bp, vec3 bs) {
+    vec3 q = abs(p - bp) - bs / 2.0f;
+    return maximum(min(q, vec3(0.0f)));
+}
+
+__device__ float sd_simple_bounding_box(vec3 p, vec3 bb_min, vec3 bb_max) {
+    return max(
+        max(
+            bb_min.x - p.x,
+            max(bb_min.y - p.y, bb_min.z - p.z)
+        ),
+        max(
+            p.x - bb_max.x,
+            max(p.y - bb_max.y, p.z - bb_max.z)
+        )
+    );
+}
+
+__device__ float sd_unit_cube(vec3 p) {
+    return sd_box(p, vec3(0.0f), vec3(1.0f));
 }
 
 //
@@ -121,15 +133,8 @@ __device__ float sd_composition(
 
         vec3 position = stack_node->position;
 
-        float bound_distance = max(
-            max(
-                node->bound_min[0] - position.x,
-                max(node->bound_min[1] - position.y, node->bound_min[2] - position.z)
-            ),
-            max(
-                position.x - node->bound_max[0],
-                max(position.y - node->bound_max[1], position.z - node->bound_max[2])
-            )
+        float bound_distance = sd_simple_bounding_box(
+            position, from_array(node->bound_min), from_array(node->bound_max)
         );
 
         if (bound_distance > collision_distance[threadIdx.x]) {

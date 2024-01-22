@@ -5,12 +5,12 @@ use crate::bindings::cuda::{
     SdRuntimeSceneGeometry, SdSpherePrimitive, BLOCK_SIZE, CONE_MARCH_LEVELS, MAX_SUN_LIGHT_COUNT,
 };
 use bevy::core_pipeline::clear_color::ClearColorConfig;
+use bevy::reflect::Array;
 use bevy::render::extract_resource::ExtractResource;
 use bevy::window::PrimaryWindow;
 use bevy::{prelude::*, render::render_resource::*};
 use cudarc::driver::{CudaDevice, CudaSlice, CudaStream, DevicePtr, LaunchAsync, LaunchConfig};
 use cudarc::nvrtc::Ptx;
-use nvtx::mark;
 use std::sync::Arc;
 
 const MAX_COMPOSITION_NODE_COUNT: usize = 65536;
@@ -21,9 +21,7 @@ const RENDER_TEXTURE_SIZE: (usize, usize) = (2560, 1440);
 
 #[derive(Debug, Clone, Default, Resource, Reflect)]
 #[reflect(Resource)]
-pub struct RenderSettings {
-    lockstep_enabled: bool,
-}
+pub struct RenderSettings {}
 
 #[derive(Debug, Clone, Resource, Reflect)]
 #[reflect(Resource)]
@@ -50,54 +48,46 @@ pub struct RenderTargetSprite {}
 #[derive(Clone, Resource, ExtractResource, Deref)]
 struct RenderTargetImage(Handle<Image>);
 
-#[derive(Clone, Debug, Reflect, Resource)]
-#[reflect(Resource)]
+#[derive(Clone, Debug)]
 struct RenderSceneGeometry {
-    compositions: Vec<SdComposition>,
-    spheres: Vec<SdSpherePrimitive>,
-    cubes: Vec<SdCubePrimitive>,
+    compositions: Box<[SdComposition; MAX_COMPOSITION_NODE_COUNT]>,
+    spheres: Box<[SdSpherePrimitive; MAX_SPHERE_NODE_COUNT]>,
+    cubes: Box<[SdCubePrimitive; MAX_CUBE_NODE_COUNT]>,
 }
 
 impl Default for RenderSceneGeometry {
     fn default() -> Self {
-        let mut compositions = Vec::with_capacity(MAX_COMPOSITION_NODE_COUNT);
-        let mut spheres = Vec::with_capacity(MAX_CUBE_NODE_COUNT);
-        let mut cubes = Vec::with_capacity(MAX_SPHERE_NODE_COUNT);
-
-        for _ in 0..MAX_COMPOSITION_NODE_COUNT {
-            compositions.push(SdComposition::default());
+        Self {
+            compositions: Box::try_from(
+                vec![SdComposition::default(); MAX_COMPOSITION_NODE_COUNT].into_boxed_slice(),
+            )
+            .unwrap(),
+            spheres: Box::try_from(
+                vec![SdSpherePrimitive::default(); MAX_SPHERE_NODE_COUNT].into_boxed_slice(),
+            )
+            .unwrap(),
+            cubes: Box::try_from(
+                vec![SdCubePrimitive::default(); MAX_CUBE_NODE_COUNT].into_boxed_slice(),
+            )
+            .unwrap(),
         }
-
-        for _ in 0..MAX_CUBE_NODE_COUNT {
-            cubes.push(SdCubePrimitive::default());
-        }
-
-        for _ in 0..MAX_SPHERE_NODE_COUNT {
-            spheres.push(SdSpherePrimitive::default());
-        }
-
-        return Self {
-            compositions,
-            spheres,
-            cubes,
-        };
     }
 }
 
 struct RenderCudaContext {
-    device: Arc<CudaDevice>,
+    pub device: Arc<CudaDevice>,
+    pub geometry_transferred_event: cudarc::driver::sys::CUevent,
 }
 
 struct RenderCudaStreams {
     render_stream: CudaStream,
-    compression_stream: CudaStream,
 }
 
 struct RenderCudaBuffers {
     render_data_texture_buffer: CudaSlice<RenderDataTextureValue>,
     render_texture_buffer: CudaSlice<u8>,
 
-    cm_texture_buffers: [Vec<CudaSlice<ConeMarchTextureValue>>; 2],
+    cm_texture_buffers: Vec<CudaSlice<ConeMarchTextureValue>>,
     compositions_buffer: CudaSlice<SdComposition>,
     cube_primitive_buffer: CudaSlice<SdCubePrimitive>,
     sphere_primitive_buffer: CudaSlice<SdSpherePrimitive>,
@@ -123,7 +113,7 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     commands.spawn((
         SpriteBundle {
             sprite: Sprite {
-                color: Color::rgba(1.0, 1.0, 1.0, 0.5),
+                color: Color::rgba(1.0, 1.0, 1.0, 1.0),
                 custom_size: Some(Vec2::new(
                     RENDER_TEXTURE_SIZE.0 as f32,
                     RENDER_TEXTURE_SIZE.1 as f32,
@@ -210,20 +200,10 @@ fn setup_cuda(world: &mut World) {
             .unwrap()
     };
 
-    let mut cm_texture_buffers = [vec![], vec![]];
+    let mut cm_texture_buffers = vec![];
 
     for i in 0..CONE_MARCH_LEVELS as usize {
-        cm_texture_buffers[0].push(unsafe {
-            device
-                .alloc::<ConeMarchTextureValue>(
-                    (RENDER_TEXTURE_SIZE.0 as f32 / compression.levels[i] as f32).ceil() as usize
-                        * (RENDER_TEXTURE_SIZE.1 as f32 / compression.levels[i] as f32).ceil()
-                            as usize,
-                )
-                .unwrap()
-        });
-
-        cm_texture_buffers[1].push(unsafe {
+        cm_texture_buffers.push(unsafe {
             device
                 .alloc::<ConeMarchTextureValue>(
                     (RENDER_TEXTURE_SIZE.0 as f32 / compression.levels[i] as f32).ceil() as usize
@@ -235,15 +215,17 @@ fn setup_cuda(world: &mut World) {
     }
 
     let render_stream = device.fork_default_stream().unwrap();
-    let compression_stream = device.fork_default_stream().unwrap();
 
     world.insert_resource(RenderSettings::default());
     world.insert_resource(compression);
-    world.insert_non_send_resource(RenderCudaContext { device });
-    world.insert_non_send_resource(RenderCudaStreams {
-        render_stream,
-        compression_stream,
+    world.insert_non_send_resource(RenderCudaContext {
+        device,
+        geometry_transferred_event: cudarc::driver::result::event::create(
+            cudarc::driver::sys::CUevent_flags_enum::CU_EVENT_DEFAULT,
+        )
+        .unwrap(),
     });
+    world.insert_non_send_resource(RenderCudaStreams { render_stream });
     world.insert_non_send_resource(RenderCudaBuffers {
         render_texture_buffer,
         render_data_texture_buffer,
@@ -252,6 +234,40 @@ fn setup_cuda(world: &mut World) {
         sphere_primitive_buffer,
         cube_primitive_buffer,
     });
+    world.insert_non_send_resource(PreviousRenderParameter::default());
+    world.insert_non_send_resource(RenderSceneGeometry::default());
+
+    let mut geometry = world.non_send_resource_mut::<RenderSceneGeometry>();
+
+    unsafe {
+        cudarc::driver::sys::cuMemHostRegister_v2(
+            geometry.compositions.as_mut_ptr() as *mut _,
+            geometry.compositions.len() * std::mem::size_of::<SdComposition>(),
+            0,
+        )
+        .result()
+        .unwrap()
+    };
+
+    unsafe {
+        cudarc::driver::sys::cuMemHostRegister_v2(
+            geometry.spheres.as_mut_ptr() as *mut _,
+            geometry.spheres.len() * std::mem::size_of::<SdSpherePrimitive>(),
+            0,
+        )
+        .result()
+        .unwrap()
+    };
+
+    unsafe {
+        cudarc::driver::sys::cuMemHostRegister_v2(
+            geometry.cubes.as_mut_ptr() as *mut _,
+            geometry.cubes.len() * std::mem::size_of::<SdCubePrimitive>(),
+            0,
+        )
+        .result()
+        .unwrap()
+    };
 }
 
 struct RenderParameters {
@@ -269,14 +285,13 @@ struct PreviousRenderParameter {
 }
 
 fn render(
-    settings: Res<RenderSettings>,
     compression: Res<RenderConeCompression>,
-    geometry: Res<RenderSceneGeometry>,
+    geometry: NonSend<RenderSceneGeometry>,
     time: Res<Time>,
     camera: Query<(&Camera, &Projection, &GlobalTransform), With<RenderCameraTarget>>,
     render_context: NonSend<RenderCudaContext>,
     render_streams: NonSendMut<RenderCudaStreams>,
-    mut render_buffers: NonSendMut<RenderCudaBuffers>,
+    render_buffers: NonSendMut<RenderCudaBuffers>,
     render_target_image: Res<RenderTargetImage>,
     mut images: ResMut<Assets<Image>>,
 
@@ -284,7 +299,7 @@ fn render(
 
     mut previous_render_parameters: NonSendMut<PreviousRenderParameter>,
 ) {
-    let parity = tick.rem_euclid(2);
+    let range_id = nvtx::range_start!("Render System Wait For Previous Frame");
 
     let image = images.get_mut(&render_target_image.0).unwrap();
     let (cam, cam_projection, cam_transform) = camera.single();
@@ -296,38 +311,55 @@ fn render(
                 image.data.as_mut_slice().len(),
                 0,
             )
+            .result()
+            .unwrap()
         };
     }
-
-    nvtx::mark!("Sync");
 
     unsafe {
         cudarc::driver::result::stream::synchronize(render_streams.render_stream.stream).unwrap()
     };
 
-    render_context
-        .device
-        .htod_copy_into(
-            geometry.compositions.clone(),
-            &mut render_buffers.compositions_buffer,
-        )
-        .unwrap();
+    nvtx::range_end!(range_id);
 
-    render_context
-        .device
-        .htod_copy_into(
-            geometry.spheres.clone(),
-            &mut render_buffers.sphere_primitive_buffer,
-        )
-        .unwrap();
+    let range_id = nvtx::range_start!("Render System Invoke");
 
-    render_context
-        .device
-        .htod_copy_into(
-            geometry.cubes.clone(),
-            &mut render_buffers.cube_primitive_buffer,
+    // Geometry Transfer
+
+    unsafe {
+        cudarc::driver::result::memcpy_htod_async(
+            render_buffers.compositions_buffer.device_ptr().clone(),
+            &geometry.compositions.as_slice(),
+            render_streams.render_stream.stream,
         )
-        .unwrap();
+        .unwrap()
+    };
+
+    unsafe {
+        cudarc::driver::result::memcpy_htod_async(
+            render_buffers.sphere_primitive_buffer.device_ptr().clone(),
+            &geometry.spheres.as_slice(),
+            render_streams.render_stream.stream,
+        )
+        .unwrap()
+    };
+
+    unsafe {
+        cudarc::driver::result::memcpy_htod_async(
+            render_buffers.cube_primitive_buffer.device_ptr().clone(),
+            &geometry.cubes.as_slice(),
+            render_streams.render_stream.stream,
+        )
+        .unwrap()
+    };
+
+    unsafe {
+        cudarc::driver::result::event::record(
+            render_context.geometry_transferred_event.clone(),
+            render_streams.render_stream.stream.clone(),
+        )
+        .unwrap()
+    };
 
     // Render Parameters
 
@@ -397,9 +429,7 @@ fn render(
     for i in 0..CONE_MARCH_LEVELS as u32 {
         cm_textures.push(crate::bindings::cuda::ConeMarchTexture {
             texture: unsafe {
-                std::mem::transmute(
-                    *(&render_buffers.cm_texture_buffers[parity as usize][i as usize]).device_ptr(),
-                )
+                std::mem::transmute(*(&render_buffers.cm_texture_buffers[i as usize]).device_ptr())
             },
             size: [
                 (RENDER_TEXTURE_SIZE.0 as f32 / compression.levels[i as usize] as f32).ceil()
@@ -425,8 +455,6 @@ fn render(
 
     //
 
-    nvtx::mark!("Invoke");
-
     if compression.enabled {
         for i in 0..CONE_MARCH_LEVELS as u32 {
             let grid_size = ((cm_textures.textures[i as usize].size[0]
@@ -440,11 +468,7 @@ fn render(
                     .get_func("main", "compute_compressed_depth")
                     .unwrap()
                     .launch_on_stream(
-                        if settings.lockstep_enabled {
-                            &render_streams.compression_stream
-                        } else {
-                            &render_streams.render_stream
-                        },
+                        &render_streams.render_stream,
                         LaunchConfig {
                             block_dim: (BLOCK_SIZE as usize as u32, 1, 1),
                             grid_dim: (grid_size, 1, 1),
@@ -464,11 +488,7 @@ fn render(
         }
     }
 
-    let render_parameters = if settings.lockstep_enabled {
-        previous_render_parameters.previous.as_ref()
-    } else {
-        Some(&parameters)
-    };
+    let render_parameters = Some(&parameters);
 
     if let Some(render_parameters) = render_parameters {
         unsafe {
@@ -537,14 +557,10 @@ fn render(
         };
     }
 
-    previous_render_parameters.previous = if settings.lockstep_enabled {
-        Some(parameters)
-    } else {
-        None
-    };
+    previous_render_parameters.previous = None;
     *tick += 1;
 
-    mark!("Invoke Completed");
+    nvtx::range_end!(range_id);
 }
 
 // Synchronization
@@ -572,13 +588,7 @@ pub struct RayMarcherRenderPlugin {}
 impl Plugin for RayMarcherRenderPlugin {
     fn build(&self, app: &mut App) {
         // Main App Build
-
-        app.world
-            .insert_non_send_resource(PreviousRenderParameter::default());
-
         app.register_type::<RenderConeCompression>()
-            .register_type::<RenderSceneGeometry>()
-            .insert_resource(RenderSceneGeometry::default())
             .add_systems(Startup, (setup, setup_cuda))
             .add_systems(Last, render)
             .add_systems(PostUpdate, (synchronize_target_sprite,));
