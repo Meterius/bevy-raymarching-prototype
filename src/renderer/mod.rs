@@ -14,7 +14,7 @@ use cudarc::nvrtc::Ptx;
 use std::ffi::CString;
 use std::sync::Arc;
 
-const MAX_COMPOSITION_NODE_COUNT: usize = 131072;
+const MAX_COMPOSITION_NODE_COUNT: usize = 160000;
 
 const RENDER_TEXTURE_SIZE: (usize, usize) = (2560, 1440);
 

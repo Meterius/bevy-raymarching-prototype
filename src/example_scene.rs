@@ -5,7 +5,7 @@ use bevy_flycam::FlyCam;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
-const SAMPLE_SPHERE_DISTANCE: f32 = 60.0;
+const SAMPLE_SPHERE_DISTANCE: f32 = 120.0;
 const SAMPLE_SPHERE_CHUNK_DISTANCE: f32 = 1000.0;
 
 pub fn setup_scene(
@@ -62,9 +62,10 @@ pub fn setup_scene(
 
     spawn_example(SdCompositionNodeVariant::Union);
     spawn_example(SdCompositionNodeVariant::Intersect);
+    spawn_example(SdCompositionNodeVariant::Difference);
 
-    if false {
-        for _ in 0..16 {
+    if true {
+        for _ in 0..64 {
             let base = Vec3::new(
                 ss_random.gen::<f32>() * SAMPLE_SPHERE_CHUNK_DISTANCE
                     - SAMPLE_SPHERE_CHUNK_DISTANCE * 0.5,
@@ -74,7 +75,7 @@ pub fn setup_scene(
                     - SAMPLE_SPHERE_CHUNK_DISTANCE * 0.5,
             );
 
-            for _ in 0..4 {
+            for _ in 0..64 {
                 commands.spawn((
                     /*PbrBundle {
                         mesh: meshes.add(Mesh::from(shape::Cube { size: 0.5 })),

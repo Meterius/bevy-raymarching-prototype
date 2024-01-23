@@ -578,8 +578,6 @@ fn compile_scene_geometry(
             .unwrap()
         };
 
-        info!("{root:?}");
-
         let mut queue = VecDeque::<(i32, SdCompositionNode)>::new();
         queue.push_back((-1, root));
 

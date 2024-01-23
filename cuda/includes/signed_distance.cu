@@ -197,7 +197,9 @@ __device__ float sd_composition(
                     break;
 
                 case SdPrimitiveVariant::Cube:
-                    sd = bound_distance;
+                    sd = sd_box(
+                        position, center, scale
+                    );
                     break;
             }
 
