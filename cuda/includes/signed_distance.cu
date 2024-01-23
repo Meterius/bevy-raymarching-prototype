@@ -110,8 +110,6 @@ struct RuntimeStackNode {
 
 #define SD_RUNTIME_STACK_MAX_DEPTH 48
 
-//__shared__ RuntimeStackNode sd_runtime_stack[SD_RUNTIME_STACK_MAX_DEPTH * BLOCK_DIM];
-
 __device__ float sd_composition(
     vec3 p,
     SdRuntimeSceneGeometry geometry,
@@ -125,8 +123,10 @@ __device__ float sd_composition(
     sd_runtime_stack[stack_index] = { p, MAX_POSITIVE_F32, geometry.compositions[index].child_leftmost };
 
     while (stack_index >= 0) {
+#if CUDA_DEBUG == true
         assert(stack_index >= 0);
         assert(stack_index < SD_RUNTIME_STACK_MAX_DEPTH);
+#endif
 
         SdComposition *node = &geometry.compositions[index];
         RuntimeStackNode *stack_node = &sd_runtime_stack[stack_index];
@@ -150,26 +150,21 @@ __device__ float sd_composition(
             }
 
             if (node->primitive_variant != SdPrimitiveVariant::None) {
-                float rev_scale;
+                vec3 scale = from_array(node->bound_max) - from_array(node->bound_min);
 
                 switch (node->primitive_variant) {
                     case SdPrimitiveVariant::None:
                         break;
 
                     case SdPrimitiveVariant::Sphere:
-                        rev_scale = minimum(from_array(geometry.sphere_primitives[node->primitive].scale));
                         sd = sd_unit_sphere(
-                            (position - from_array(geometry.sphere_primitives[node->primitive].translation))
-                            / from_array(geometry.sphere_primitives[node->primitive].scale)
-                        ) * rev_scale;
+                            (position - 0.5f * scale)
+                            / (from_array(node->bound_max) - from_array(node->bound_min))
+                        ) * minimum(scale);
                         break;
 
                     case SdPrimitiveVariant::Cube:
-                        rev_scale = minimum(from_array(geometry.cube_primitives[node->primitive].scale));
-                        sd = sd_unit_cube(
-                            (position - from_array(geometry.cube_primitives[node->primitive].translation))
-                            / from_array(geometry.cube_primitives[node->primitive].scale)
-                        ) * rev_scale;
+                        sd = bound_distance;
                         break;
                 }
 

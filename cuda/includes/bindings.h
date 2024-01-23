@@ -1,5 +1,7 @@
 #pragma once
 
+#define CUDA_DEBUG false
+
 #define CONE_MARCH_LEVELS 2
 #define MAX_SUN_LIGHT_COUNT 1
 #define MAX_POINT_LIGHT_COUNT 1

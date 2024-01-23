@@ -606,7 +606,7 @@ extern "C" __global__ void compute_render_finalize(
     unsigned int rgba = ((unsigned int) (255.0f * color.x) & 0xff) |
                         (((unsigned int) (255.0f * color.y) & 0xff) << 8) |
                         (((unsigned int) (255.0f * color.z) & 0xff) << 16) |
-                        (255 << 24);
+        ((unsigned int) 255 << 24);
 
     render_texture.texture[index_2d(texture_coord, render_texture)] = rgba;
 }

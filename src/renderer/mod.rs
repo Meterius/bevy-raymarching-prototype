@@ -149,7 +149,7 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
 
 // Render Systems
 
-const USE_PTX: bool = false;
+const USE_PTX: bool = true;
 
 fn setup_cuda(world: &mut World) {
     let compression = RenderConeCompression::default();
@@ -196,6 +196,11 @@ fn setup_cuda(world: &mut World) {
     } else {
         let module = unsafe {
             let src = include_bytes!("../../assets/cuda/compiled/main.cubin");
+            cudarc::driver::result::module::load_data(src.as_ptr() as *const _).unwrap()
+        };
+
+        let _regl_module = unsafe {
+            let src = include_bytes!("../../assets/cuda/compiled/main_regl.cubin");
             cudarc::driver::result::module::load_data(src.as_ptr() as *const _).unwrap()
         };
 

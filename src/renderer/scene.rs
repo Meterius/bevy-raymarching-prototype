@@ -221,6 +221,18 @@ fn simple_center_split_reordering(node: &mut SdCompositionNode) {
     } else if child_right.children.len() == 0 {
         std::mem::swap(&mut node.children, &mut child_left.children);
     } else {
+        // unwrap singular child nodes
+        let child_left = if child_left.children.len() == 1 {
+            child_left.children.remove(0)
+        } else {
+            child_left
+        };
+        let child_right = if child_right.children.len() == 1 {
+            child_right.children.remove(0)
+        } else {
+            child_right
+        };
+
         node.children.push(child_left);
         node.children.push(child_right);
     }
@@ -421,6 +433,11 @@ fn compile_scene_geometry(
     queue.push_back((-1, root));
 
     while let Some((parent, item)) = queue.pop_front() {
+        assert!(
+            item.children.len() == 2 || item.primitive.is_some(),
+            "Must be leaf node or is binary, got {item:?}"
+        );
+
         geometry.compositions[composition_index] = cuda::SdComposition {
             variant: match item.variant {
                 SdCompositionNodeVariant::Primitive => cuda::SdCompositionVariant_Union,
@@ -462,6 +479,7 @@ fn compile_scene_geometry(
             child_rightmost: (composition_children_index + item.children.len() - 1) as i32,
             bound_min: item.bounding_box.0.to_array(),
             bound_max: item.bounding_box.1.to_array(),
+            ..default()
         };
 
         composition_children_index += item.children.len();
