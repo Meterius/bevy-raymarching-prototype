@@ -1,10 +1,13 @@
-use crate::renderer::RenderConeCompression;
+use crate::renderer::scene::RenderSceneSettings;
+use crate::renderer::{RenderConeCompression, RenderTargetSprite};
 use bevy::{app::AppExit, prelude::*};
 use bevy_flycam::MovementSettings;
 
 pub fn receive_input(
+    mut render_sprite: Query<&mut Sprite, With<RenderTargetSprite>>,
     mut movement_settings: ResMut<MovementSettings>,
     mut compression_settings: ResMut<RenderConeCompression>,
+    mut render_settings: ResMut<RenderSceneSettings>,
     keyboard_input: Res<Input<KeyCode>>,
     mut exit: EventWriter<AppExit>,
 ) {
@@ -20,5 +23,14 @@ pub fn receive_input(
 
     if keyboard_input.just_pressed(KeyCode::C) {
         compression_settings.enabled = !compression_settings.enabled;
+    }
+
+    if keyboard_input.just_pressed(KeyCode::B) {
+        let toggle = !render_settings.enable_debug_gizmos;
+        render_settings.enable_debug_gizmos = toggle;
+        render_sprite
+            .single_mut()
+            .color
+            .set_a(if toggle { 0.5 } else { 1.0 });
     }
 }

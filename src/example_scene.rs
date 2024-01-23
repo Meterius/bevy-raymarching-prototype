@@ -1,4 +1,4 @@
-use crate::renderer::scene::{SdComposition, SdPrimitive, SdVisual};
+use crate::renderer::scene::{SdComposition, SdCompositionNodeVariant, SdPrimitive, SdVisual};
 use crate::renderer::RenderCameraTarget;
 use bevy::prelude::*;
 use bevy_flycam::FlyCam;
@@ -15,39 +15,56 @@ pub fn setup_scene(
 ) {
     let mut ss_random = StdRng::seed_from_u64(0);
 
-    let child1 = commands
-        .spawn((
-            SdPrimitive::Box(Vec3::new(5.0, 2.0, 1.0)),
-            SpatialBundle {
-                transform: Transform::from_xyz(0.0, 0.0, -0.5),
-                ..default()
-            },
-        ))
-        .id();
+    let mut example_offset = 0.0;
+    let mut spawn_example = |variant: SdCompositionNodeVariant| {
+        let child1 = commands
+            .spawn((
+                SdPrimitive::Box(Vec3::new(5.0, 2.0, 1.0)),
+                SpatialBundle {
+                    transform: Transform::from_xyz(0.0, 0.0, -0.5),
+                    ..default()
+                },
+            ))
+            .id();
 
-    let child2 = commands
-        .spawn((
-            SdPrimitive::Sphere(1.0),
-            SpatialBundle {
-                transform: Transform::from_xyz(0.0, 0.0, 0.0),
-                ..default()
-            },
-        ))
-        .id();
+        let child2 = commands
+            .spawn((
+                SdPrimitive::Sphere(1.0),
+                SpatialBundle {
+                    transform: Transform::from_xyz(0.0, 0.0, 0.0),
+                    ..default()
+                },
+            ))
+            .id();
 
-    commands
-        .spawn((
-            SdComposition::Union(vec![child1, child2]),
-            SdVisual::default(),
-            SpatialBundle {
-                transform: Transform::from_xyz(0.0, 2.0, 0.0),
-                ..default()
-            },
-        ))
-        .push_children(&[child1, child2]);
+        commands
+            .spawn((
+                match variant {
+                    SdCompositionNodeVariant::Union => SdComposition::Union(vec![child1, child2]),
+                    SdCompositionNodeVariant::Intersect => {
+                        SdComposition::Intersect(vec![child1, child2])
+                    }
+                    SdCompositionNodeVariant::Difference => {
+                        SdComposition::Difference(vec![child1, child2])
+                    }
+                    _ => unimplemented!(),
+                },
+                SdVisual::default(),
+                SpatialBundle {
+                    transform: Transform::from_xyz(0.0, 2.0, example_offset),
+                    ..default()
+                },
+            ))
+            .push_children(&[child1, child2]);
 
-    if true {
-        for _ in 0..1 {
+        *&mut example_offset += 4.0;
+    };
+
+    spawn_example(SdCompositionNodeVariant::Union);
+    spawn_example(SdCompositionNodeVariant::Intersect);
+
+    if false {
+        for _ in 0..16 {
             let base = Vec3::new(
                 ss_random.gen::<f32>() * SAMPLE_SPHERE_CHUNK_DISTANCE
                     - SAMPLE_SPHERE_CHUNK_DISTANCE * 0.5,
@@ -98,7 +115,7 @@ pub fn setup_scene(
     // camera
     commands.spawn((
         Camera3dBundle {
-            transform: Transform::from_xyz(5.0, 5.0, 5.0)
+            transform: Transform::from_xyz(5.0, 5.0, -5.0)
                 .looking_at(Vec3::new(0.0, 2.0, 0.0), Vec3::Y),
             ..default()
         },

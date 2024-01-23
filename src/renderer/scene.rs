@@ -20,7 +20,8 @@ impl Default for SdPrimitive {
 #[reflect(Component)]
 pub enum SdComposition {
     Union(Vec<Entity>),
-    Difference(Vec<Entity>),
+    Intersect(Vec<Entity>),
+    Difference(Vec<Entity>), // first element minus the remaining
 }
 
 impl Default for SdComposition {
@@ -29,13 +30,24 @@ impl Default for SdComposition {
     }
 }
 
-#[derive(Default, Debug, Clone, Component, Reflect)]
+#[derive(Debug, Clone, Component, Reflect)]
 #[reflect(Component)]
 pub struct SdVisual {
     pub enabled: bool,
 }
 
+impl Default for SdVisual {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
 //
+
+#[derive(Default, Debug, Clone, Resource)]
+pub struct RenderSceneStoredGeometry {
+    root: Option<SdCompositionNode>,
+}
 
 #[derive(Default, Debug, Clone, Resource, Reflect)]
 #[reflect(Resource)]
@@ -52,6 +64,7 @@ impl Plugin for RenderScenePlugin {
             .register_type::<SdComposition>()
             .register_type::<SdVisual>()
             .register_type::<RenderSceneSettings>()
+            .insert_resource(RenderSceneStoredGeometry::default())
             .insert_resource(RenderSceneSettings {
                 enable_debug_gizmos: false,
             })
@@ -61,14 +74,14 @@ impl Plugin for RenderScenePlugin {
 
 //
 
-#[derive(Default, Debug)]
+#[derive(Default, Clone, Debug)]
 pub enum SdPrimitiveNodeVariant {
     #[default]
     Sphere,
     Cube,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Clone, Debug)]
 pub struct SdPrimitiveNode {
     variant: SdPrimitiveNodeVariant,
     translation: Vec3,
@@ -89,7 +102,7 @@ impl SdPrimitiveNode {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Clone, Debug)]
 pub enum SdCompositionNodeVariant {
     Primitive,
     #[default]
@@ -98,7 +111,7 @@ pub enum SdCompositionNodeVariant {
     Intersect,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SdCompositionNode {
     variant: SdCompositionNodeVariant,
     primitive: Option<SdPrimitiveNode>,
@@ -127,6 +140,29 @@ impl SdCompositionNode {
 
     fn total(&self) -> usize {
         return self.children.iter().fold(1, |x, child| x + child.total());
+    }
+
+    fn flatten(&mut self) {
+        self.children.iter_mut().for_each(|child| child.flatten());
+
+        match self.variant {
+            SdCompositionNodeVariant::Union => {
+                let mut prev_children = Vec::new();
+                std::mem::swap(&mut self.children, &mut prev_children);
+
+                prev_children.into_iter().for_each(|mut child| {
+                    match child.variant {
+                        SdCompositionNodeVariant::Union => {
+                            self.children.append(&mut child.children);
+                        }
+                        _ => {
+                            self.children.push(child);
+                        }
+                    };
+                });
+            }
+            _ => {}
+        };
     }
 
     fn normalize(mut self) -> Self {
@@ -296,12 +332,31 @@ fn fill_scene_geometry_node_bounding_boxes(node: &mut SdCompositionNode) {
     if let Some(primitive) = node.primitive.as_ref() {
         node.bounding_box = primitive.bounding_box();
     } else {
-        let mut bounding_box = (Vec3::INFINITY, Vec3::NEG_INFINITY);
+        let mut bounding_box;
+        match node.variant {
+            SdCompositionNodeVariant::Primitive => {
+                panic!("Expected primitive variant to store primitive")
+            }
+            SdCompositionNodeVariant::Union => {
+                bounding_box = (Vec3::INFINITY, Vec3::NEG_INFINITY);
 
-        node.children.iter_mut().for_each(|child| {
-            bounding_box.0 = child.bounding_box.0.min(bounding_box.0);
-            bounding_box.1 = child.bounding_box.1.max(bounding_box.1);
-        });
+                node.children.iter_mut().for_each(|child| {
+                    bounding_box.0 = child.bounding_box.0.min(bounding_box.0);
+                    bounding_box.1 = child.bounding_box.1.max(bounding_box.1);
+                });
+            }
+            SdCompositionNodeVariant::Intersect => {
+                bounding_box = (Vec3::NEG_INFINITY, Vec3::INFINITY);
+
+                node.children.iter_mut().for_each(|child| {
+                    bounding_box.0 = child.bounding_box.0.max(bounding_box.0);
+                    bounding_box.1 = child.bounding_box.1.min(bounding_box.1);
+                });
+            }
+            SdCompositionNodeVariant::Difference => {
+                bounding_box = node.children[0].bounding_box.clone();
+            }
+        };
 
         node.bounding_box = bounding_box;
     }
@@ -342,10 +397,20 @@ fn collect_scene_geometry(
             Or<(With<SdPrimitive>, With<SdComposition>)>,
         >,
     ) -> Option<SdCompositionNode> {
-        let (_, trn, primitive, composition, visual) = nodes.get(id).ok()?;
+        let (_id, trn, primitive, composition, _visual) = nodes.get(id).ok()?;
 
         if let Some(composition) = composition {
             match composition {
+                SdComposition::Intersect(children) => {
+                    return Some(SdCompositionNode {
+                        variant: SdCompositionNodeVariant::Intersect,
+                        children: children
+                            .iter()
+                            .filter_map(|child| convert(child.clone(), nodes))
+                            .collect(),
+                        ..default()
+                    });
+                }
                 SdComposition::Union(children) => {
                     return Some(SdCompositionNode {
                         variant: SdCompositionNodeVariant::Union,
@@ -403,21 +468,26 @@ fn collect_scene_geometry(
         }
 
         return None;
-    };
+    }
 
-    for (id, ..) in nodes.iter() {
-        if let Some(item) = convert(id, nodes) {
-            roots.push(item);
+    for (id, _trn, _primitive, _composition, visual) in nodes.iter() {
+        if let Some(SdVisual { enabled: true }) = visual {
+            if let Some(item) = convert(id, nodes) {
+                roots.push(item);
+            }
         }
     }
 
-    return SdCompositionNode {
+    let mut node = SdCompositionNode {
         variant: SdCompositionNodeVariant::Union,
         primitive: None,
         children: roots,
         bounding_box: (Vec3::NEG_INFINITY, Vec3::INFINITY),
-    }
-    .normalize();
+    };
+
+    node.flatten();
+
+    return node.normalize();
 }
 
 fn draw_bb_gizmos(gizmos: &mut Gizmos, node: &SdCompositionNode) {
@@ -438,6 +508,7 @@ fn draw_bb_gizmos(gizmos: &mut Gizmos, node: &SdCompositionNode) {
 const PRINT_COMPILE_SCENE_GEOMETRY_INFO: bool = true;
 
 fn compile_scene_geometry(
+    mut render_scene_stored: ResMut<RenderSceneStoredGeometry>,
     settings: Res<RenderSceneSettings>,
     render_context: NonSend<RenderCudaContext>,
     mut gizmos: Gizmos,
@@ -465,105 +536,111 @@ fn compile_scene_geometry(
         ),
     >,
 ) {
-    if changed_nodes.is_empty() {
-        nvtx::mark!("Skipped Geometry Compilation");
-        return;
-    }
+    if !changed_nodes.is_empty() {
+        let range_id = nvtx::range_start!("Compile Geometry");
 
-    let range_id = nvtx::range_start!("Compile Geometry");
+        let start = std::time::Instant::now();
 
-    let start = std::time::Instant::now();
+        let mut composition_index: usize = 0;
+        let mut composition_children_index: usize = 1;
 
-    let mut composition_index: usize = 0;
-    let mut composition_children_index: usize = 1;
+        let sub_range_id = nvtx::range_start!("Compile Geometry - Collect");
+        let mut root = collect_scene_geometry(&mut nodes);
 
-    let sub_range_id = nvtx::range_start!("Compile Geometry - Collect");
-    let mut root = collect_scene_geometry(&mut nodes);
-    nvtx::range_end!(sub_range_id);
+        nvtx::range_end!(sub_range_id);
 
-    fill_scene_geometry_non_leaf_bounding_boxes(&mut root);
+        fill_scene_geometry_non_leaf_bounding_boxes(&mut root);
 
-    let sub_range_id = nvtx::range_start!("Compile Geometry - BVH");
-    simple_center_split_reordering(&mut root);
-    nvtx::range_end!(sub_range_id);
+        let sub_range_id = nvtx::range_start!("Compile Geometry - BVH");
+        simple_center_split_reordering(&mut root);
+        nvtx::range_end!(sub_range_id);
 
-    let root_depth = if PRINT_COMPILE_SCENE_GEOMETRY_INFO {
-        root.depth()
-    } else {
-        0
-    };
-    let root_count = if PRINT_COMPILE_SCENE_GEOMETRY_INFO {
-        root.total()
-    } else {
-        0
-    };
+        render_scene_stored.root = Some(root.clone());
 
-    if settings.enable_debug_gizmos {
-        draw_bb_gizmos(&mut gizmos, &root);
-    }
-
-    // store compiled geometry
-
-    unsafe {
-        cudarc::driver::sys::cuEventSynchronize(render_context.geometry_transferred_event.clone())
-            .result()
-            .unwrap()
-    };
-
-    let mut queue = VecDeque::<(i32, SdCompositionNode)>::new();
-    queue.push_back((-1, root));
-
-    while let Some((parent, item)) = queue.pop_front() {
-        assert!(
-            item.children.len() == 2 || item.primitive.is_some(),
-            "Must be leaf node or is binary, got {item:?}"
-        );
-
-        let mut node = cuda::SdComposition {
-            child: composition_children_index as _,
-            bound_min: item.bounding_box.0.to_array(),
-            bound_max: item.bounding_box.1.to_array(),
-            ..default()
+        let root_depth = if PRINT_COMPILE_SCENE_GEOMETRY_INFO {
+            root.depth()
+        } else {
+            0
+        };
+        let root_count = if PRINT_COMPILE_SCENE_GEOMETRY_INFO {
+            root.total()
+        } else {
+            0
         };
 
-        node.set_parent(parent as _);
+        // store compiled geometry
 
-        node.set_variant(match item.variant {
-            SdCompositionNodeVariant::Primitive => cuda::SdCompositionVariant_Union,
-            SdCompositionNodeVariant::Union => cuda::SdCompositionVariant_Union,
-            SdCompositionNodeVariant::Difference => cuda::SdCompositionVariant_Difference,
-            SdCompositionNodeVariant::Intersect => cuda::SdCompositionVariant_Intersect,
-        });
+        unsafe {
+            cudarc::driver::sys::cuEventSynchronize(
+                render_context.geometry_transferred_event.clone(),
+            )
+            .result()
+            .unwrap()
+        };
 
-        node.set_primitive_variant(match item.primitive {
-            Some(primitive) => match primitive.variant {
-                SdPrimitiveNodeVariant::Cube => cuda::SdPrimitiveVariant_Cube,
-                SdPrimitiveNodeVariant::Sphere => cuda::SdPrimitiveVariant_Sphere,
-            },
-            None => cuda::SdPrimitiveVariant_None,
-        });
+        info!("{root:?}");
 
-        geometry.compositions[composition_index] = node;
+        let mut queue = VecDeque::<(i32, SdCompositionNode)>::new();
+        queue.push_back((-1, root));
 
-        composition_children_index += item.children.len();
-        queue.extend(
-            item.children
-                .into_iter()
-                .map(|x| (composition_index as i32, x)),
-        );
-        composition_index += 1;
+        while let Some((parent, item)) = queue.pop_front() {
+            assert!(
+                item.children.len() == 2 || item.primitive.is_some(),
+                "Must be leaf node or is binary, got {item:?}"
+            );
+
+            let mut node = cuda::SdComposition {
+                child: composition_children_index as _,
+                bound_min: item.bounding_box.0.to_array(),
+                bound_max: item.bounding_box.1.to_array(),
+                ..default()
+            };
+
+            node.set_parent(parent as _);
+
+            node.set_variant(match item.variant {
+                SdCompositionNodeVariant::Primitive => cuda::SdCompositionVariant_Union,
+                SdCompositionNodeVariant::Union => cuda::SdCompositionVariant_Union,
+                SdCompositionNodeVariant::Difference => cuda::SdCompositionVariant_Difference,
+                SdCompositionNodeVariant::Intersect => cuda::SdCompositionVariant_Intersect,
+            });
+
+            node.set_primitive_variant(match item.primitive {
+                Some(primitive) => match primitive.variant {
+                    SdPrimitiveNodeVariant::Cube => cuda::SdPrimitiveVariant_Cube,
+                    SdPrimitiveNodeVariant::Sphere => cuda::SdPrimitiveVariant_Sphere,
+                },
+                None => cuda::SdPrimitiveVariant_None,
+            });
+
+            geometry.compositions[composition_index] = node;
+
+            composition_children_index += item.children.len();
+            queue.extend(
+                item.children
+                    .into_iter()
+                    .map(|x| (composition_index as i32, x)),
+            );
+            composition_index += 1;
+        }
+
+        if PRINT_COMPILE_SCENE_GEOMETRY_INFO {
+            info!(
+                "Scene Compilation Took {:.2}ms",
+                1000.0 * start.elapsed().as_secs_f32()
+            );
+            info!(
+                "Scene Composition Depth {} And Count {}",
+                root_depth, root_count
+            );
+        }
+
+        nvtx::range_end!(range_id);
     }
 
-    if PRINT_COMPILE_SCENE_GEOMETRY_INFO {
-        info!(
-            "Scene Compilation Took {:.2}ms",
-            1000.0 * start.elapsed().as_secs_f32()
-        );
-        info!(
-            "Scene Composition Depth {} And Count {}",
-            root_depth, root_count
-        );
+    if settings.enable_debug_gizmos {
+        if let Some(root) = render_scene_stored.root.as_ref() {
+            draw_bb_gizmos(&mut gizmos, root);
+        }
     }
-
-    nvtx::range_end!(range_id);
 }
