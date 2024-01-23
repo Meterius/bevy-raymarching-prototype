@@ -28,31 +28,22 @@ __device__ RayMarchHit ray_march(
         hit.outcome = starting.outcome;
     } else {
         for (; hit.steps < RAY_MARCH_STEP_LIMIT; hit.steps++) {
-            float collision_distance = cone_radius_at_unit * hit.depth;
-
+            float collision_distance = useConeMarch ? max(RAY_MARCH_COLLISION_DISTANCE, cone_radius_at_unit * hit.depth)
+                                                    : RAY_MARCH_COLLISION_DISTANCE;
             float d = sd_scene(hit.position, collision_distance);
 
-            if (useConeMarch) {
-                if (d < cone_radius_at_unit * hit.depth) {
-                    hit.outcome = Collision;
-                    break;
-                }
-            } else {
-                if (d < RAY_MARCH_COLLISION_DISTANCE) {
-                    hit.outcome = Collision;
-                    break;
-                }
+            if (d < collision_distance) {
+                hit.outcome = Collision;
+                break;
             }
 
-            float diff = d;
-
             if (useConeMarch) {
-                hit.depth += diff - cone_radius_at_unit * hit.depth;
+                hit.depth += d - collision_distance;
             } else {
-                hit.depth += diff;
+                hit.depth += d;
             }
 
-            hit.position += diff * ray.direction;
+            hit.position += d * ray.direction;
 
             if (hit.depth > RAY_MARCH_DEPTH_LIMIT) {
                 hit.outcome = DepthLimit;

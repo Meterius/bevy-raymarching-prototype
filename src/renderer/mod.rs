@@ -14,7 +14,7 @@ use cudarc::nvrtc::Ptx;
 use std::ffi::CString;
 use std::sync::Arc;
 
-const MAX_COMPOSITION_NODE_COUNT: usize = 65536;
+const MAX_COMPOSITION_NODE_COUNT: usize = 131072;
 const MAX_CUBE_NODE_COUNT: usize = 65536;
 const MAX_SPHERE_NODE_COUNT: usize = 65536;
 
@@ -119,7 +119,7 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     commands.spawn((
         SpriteBundle {
             sprite: Sprite {
-                color: Color::rgba(1.0, 1.0, 1.0, 1.0),
+                color: Color::rgba(1.0, 1.0, 1.0, 0.5),
                 custom_size: Some(Vec2::new(
                     RENDER_TEXTURE_SIZE.0 as f32,
                     RENDER_TEXTURE_SIZE.1 as f32,

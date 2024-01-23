@@ -5,8 +5,8 @@ use bevy_flycam::FlyCam;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
-const SAMPLE_SPHERE_DISTANCE: f32 = 20.0;
-const SAMPLE_SPHERE_CHUNK_DISTANCE: f32 = 500.0;
+const SAMPLE_SPHERE_DISTANCE: f32 = 60.0;
+const SAMPLE_SPHERE_CHUNK_DISTANCE: f32 = 1000.0;
 
 pub fn setup_scene(
     mut commands: Commands,
@@ -25,7 +25,7 @@ pub fn setup_scene(
                 - SAMPLE_SPHERE_CHUNK_DISTANCE * 0.5,
         );
 
-        for _ in 0..64 {
+        for _ in 0..128 {
             commands.spawn((
                 /*PbrBundle {
                     mesh: meshes.add(Mesh::from(shape::Cube { size: 0.5 })),
@@ -45,11 +45,7 @@ pub fn setup_scene(
                     ),
                     ..default()
                 },
-                SdPrimitive::Box(Vec3::new(
-                    ss_random.gen::<f32>() + 0.1,
-                    ss_random.gen::<f32>() + 0.1,
-                    ss_random.gen::<f32>() + 0.1,
-                )),
+                SdPrimitive::Sphere(0.25 + ss_random.gen::<f32>() * 1.75),
                 SdVisual::default(),
             ));
         }

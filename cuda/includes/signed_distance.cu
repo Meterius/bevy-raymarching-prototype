@@ -55,7 +55,7 @@ __device__ float sd_mandelbulb(vec3 p, float time) {
 // primitives
 
 __device__ float sd_unit_sphere(vec3 p) {
-    return length(p) - 1.0;
+    return length(p) - 0.5;
 }
 
 __device__ float sd_box(vec3 p, vec3 bp, vec3 bs) {
@@ -106,7 +106,7 @@ struct RuntimeStackNode {
     float sd;
 };
 
-#define USE_SHARED_RUNTIME_STACK true
+#define USE_SHARED_RUNTIME_STACK false
 #define SD_RUNTIME_STACK_MAX_DEPTH 48
 #define SD_SHARED_RUNTIME_STACK_MAX_DEPTH 18
 
@@ -142,7 +142,7 @@ __device__ float sd_composition(
     const auto get_stack_node = [&](int i) {
         return &sd_runtime_stack[
 #if USE_SHARED_RUNTIME_STACK == true
-threadIdx.x + i * BLOCK_SIZE
+            threadIdx.x + i * BLOCK_SIZE
 #else
             i
 #endif
@@ -190,6 +190,7 @@ threadIdx.x + i * BLOCK_SIZE
 
         if (node.primitive_variant != SdPrimitiveVariant::None) {
             vec3 scale = from_array(node.bound_max) - from_array(node.bound_min);
+            vec3 center = 0.5f * (from_array(node.bound_max) + from_array(node.bound_min));
 
             switch (node.primitive_variant) {
                 case SdPrimitiveVariant::None:
@@ -197,8 +198,7 @@ threadIdx.x + i * BLOCK_SIZE
 
                 case SdPrimitiveVariant::Sphere:
                     sd = sd_unit_sphere(
-                        (position - 0.5f * scale)
-                        / (from_array(node.bound_max) - from_array(node.bound_min))
+                        (position - center) / scale
                     ) * minimum(scale);
                     break;
 

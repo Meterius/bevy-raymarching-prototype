@@ -53,7 +53,7 @@ impl Plugin for RenderScenePlugin {
             .register_type::<SdVisual>()
             .register_type::<RenderSceneSettings>()
             .insert_resource(RenderSceneSettings {
-                enable_debug_gizmos: false,
+                enable_debug_gizmos: true,
             })
             .add_systems(PostUpdate, (compile_scene_geometry,));
     }
@@ -352,7 +352,7 @@ fn draw_bb_gizmos(gizmos: &mut Gizmos, node: &SdCompositionNode) {
     })
 }
 
-const PRINT_COMPILE_SCENE_GEOMETRY_INFO: bool = false;
+const PRINT_COMPILE_SCENE_GEOMETRY_INFO: bool = true;
 
 fn compile_scene_geometry(
     settings: Res<RenderSceneSettings>,
@@ -431,8 +431,6 @@ fn compile_scene_geometry(
 
     let mut queue = VecDeque::<(i32, SdCompositionNode)>::new();
     queue.push_back((-1, root));
-
-    println!("{}", std::mem::size_of::<cuda::SdComposition>());
 
     while let Some((parent, item)) = queue.pop_front() {
         assert!(

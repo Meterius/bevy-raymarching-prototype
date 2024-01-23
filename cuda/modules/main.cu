@@ -139,10 +139,6 @@ __device__ auto make_sds_scene(GlobalsBuffer &globals, CameraBuffer &camera) {
     return [=](vec3 p, float cd, RenderSurfaceData &surface_output) {
         float sd = box_sds(p, cd, surface_output);
 
-        for (int i = 0; i < 0; i++) {
-            sd = min(sd, box_sds(p + vec3(5.0f * i, -10.0f, 0.0f), cd, surface_output));
-        }
-
         sd = min(runtime_scene_sds(p, cd, surface_output), sd);
         //sd = min(plane_scene_sds(p, surface_output), sd);
         // sd = min(mandelbulb_scene_sds(p, surface_output), sd);
