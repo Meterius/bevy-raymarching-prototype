@@ -21,7 +21,7 @@ pub fn setup_scene(
             .spawn((
                 SdPrimitive::Box(Vec3::new(5.0, 2.0, 1.0)),
                 SpatialBundle {
-                    transform: Transform::from_xyz(0.0, 0.0, -0.5),
+                    transform: Transform::from_xyz(0.0, 0.0, 0.0),
                     ..default()
                 },
             ))
@@ -32,6 +32,10 @@ pub fn setup_scene(
                 SdPrimitive::Sphere(1.0),
                 SpatialBundle {
                     transform: Transform::from_xyz(0.0, 0.0, 0.0),
+                    ..default()
+                },
+                AxisCyclicMotion {
+                    direction: Vec3::new(0.0, 0.0, 1.75),
                     ..default()
                 },
             ))
@@ -63,6 +67,24 @@ pub fn setup_scene(
     spawn_example(SdCompositionNodeVariant::Union);
     spawn_example(SdCompositionNodeVariant::Intersect);
     spawn_example(SdCompositionNodeVariant::Difference);
+
+    commands.spawn((
+        SpatialBundle {
+            transform: Transform::from_xyz(0.0, -0.5, 0.0),
+            ..default()
+        },
+        SdPrimitive::Box(Vec3::new(30.0, 1.0, 30.0)),
+        SdVisual::default(),
+    ));
+
+    commands.spawn((
+        SpatialBundle {
+            transform: Transform::from_xyz(-425.0, 0.0, 0.0),
+            ..default()
+        },
+        SdPrimitive::Mandelbulb(400.0),
+        SdVisual::default(),
+    ));
 
     if true {
         for _ in 0..64 {
@@ -97,6 +119,22 @@ pub fn setup_scene(
                     },
                     SdPrimitive::Sphere(0.25 + ss_random.gen::<f32>() * 1.75),
                     SdVisual::default(),
+                    SphericCyclicMotion {
+                        distances: 50.0
+                            * Vec3::new(
+                                ss_random.gen::<f32>(),
+                                ss_random.gen::<f32>(),
+                                ss_random.gen::<f32>(),
+                            ),
+                        cycle_durations: 10.0 * Vec3::ONE
+                            + 30.0
+                                * Vec3::new(
+                                    ss_random.gen::<f32>(),
+                                    ss_random.gen::<f32>(),
+                                    ss_random.gen::<f32>(),
+                                ),
+                        ..default()
+                    },
                 ));
             }
         }
@@ -123,4 +161,84 @@ pub fn setup_scene(
         FlyCam,
         RenderCameraTarget::default(),
     ));
+}
+
+#[derive(Debug, Clone, Component)]
+pub struct SphericCyclicMotion {
+    center: Option<Vec3>,
+    distances: Vec3,
+    cycle_durations: Vec3,
+}
+
+impl Default for SphericCyclicMotion {
+    fn default() -> Self {
+        Self {
+            center: None,
+            distances: Vec3::ONE,
+            cycle_durations: Vec3::ONE * 5.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Component)]
+pub struct AxisCyclicMotion {
+    center: Option<Vec3>,
+    direction: Vec3,
+    cycle_duration: f32,
+}
+
+impl Default for AxisCyclicMotion {
+    fn default() -> Self {
+        Self {
+            center: None,
+            direction: Vec3::Y,
+            cycle_duration: 5.0,
+        }
+    }
+}
+
+fn set_center(
+    mut motions: Query<(&Transform, &mut AxisCyclicMotion), Added<AxisCyclicMotion>>,
+    mut sphere_motions: Query<(&Transform, &mut SphericCyclicMotion), Added<SphericCyclicMotion>>,
+) {
+    for (trn, mut mot) in motions.iter_mut() {
+        if mot.center.is_none() {
+            mot.center = Some(trn.translation);
+        }
+    }
+
+    for (trn, mut mot) in sphere_motions.iter_mut() {
+        if mot.center.is_none() {
+            mot.center = Some(trn.translation);
+        }
+    }
+}
+
+fn apply_motion(
+    time: Res<Time>,
+    mut motions: Query<(&mut Transform, &AxisCyclicMotion), Without<SphericCyclicMotion>>,
+    mut sphere_motions: Query<(&mut Transform, &SphericCyclicMotion), Without<AxisCyclicMotion>>,
+) {
+    for (mut trn, mot) in motions.iter_mut() {
+        trn.translation = mot.center.unwrap_or_default()
+            + mot.direction
+                * (2.0 * std::f32::consts::PI * time.elapsed_seconds() / mot.cycle_duration).sin();
+    }
+
+    for (mut trn, mot) in sphere_motions.iter_mut() {
+        let d =
+            Vec3::ONE * 2.0 * std::f32::consts::PI * time.elapsed_seconds() / mot.cycle_durations;
+
+        trn.translation = mot.center.unwrap_or_default()
+            + mot.distances * Vec3::new(d.x.sin(), d.y.sin(), d.z.sin());
+    }
+}
+
+#[derive(Default)]
+pub struct ExampleScenePlugin {}
+
+impl Plugin for ExampleScenePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Update, (set_center, apply_motion.after(set_center)));
+    }
 }

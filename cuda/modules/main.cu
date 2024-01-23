@@ -495,7 +495,7 @@ extern "C" __global__ void compute_render(
     };
 }
 
-#define STEP_GAUSSIAN_SIZE 6
+#define STEP_GAUSSIAN_SIZE 24
 #define STEP_GAUSSIAN_DEV 12.0f
 
 __device__ float step_gaussian_value(int i, int j) {
@@ -520,7 +520,7 @@ extern "C" __global__ void compute_render_finalize(
 
     float blended_steps = 0.0f;
 
-    if (compression_enabled && false) {
+    if (compression_enabled && true) {
         float total = 0.0f;
 
         for (int i = -STEP_GAUSSIAN_SIZE; i <= STEP_GAUSSIAN_SIZE; i++) {
@@ -581,14 +581,20 @@ extern "C" __global__ void compute_render_finalize(
 
     vec3 color;
 
+    float geo_step_fac = texture_value.steps / (RAY_MARCH_STEP_LIMIT * 0.1f);
+    float step_fac = texture_value.steps / (RAY_MARCH_STEP_LIMIT * 0.5f);
+    float geo_powered_step_fac = pow(geo_step_fac, 3.0);
+    float powered_step_fac = pow(step_fac, 3.0);
+
     if (texture_value.outcome == Collision) {
-        color = from_array(texture_value.color) * texture_value.light +
-                vec3(texture_value.depth * 0.0001f);
+        color = from_array(texture_value.color) * texture_value.light *
+                (1.0f + 5.0f * geo_powered_step_fac * float(globals.use_step_glow_on_foreground)) +
+                vec3(texture_value.depth * 0.00001f);
         // color = from_array(texture_value.color);
         // color = vec3(texture_value.depth * 0.00005f);
     } else if (texture_value.outcome == DepthLimit) {
         color = vec3(vec3(0.2f, 0.4f, 1.0f) * 3.0f * 0.0f + texture_value.steps * 0.01f);
-        color = vec3(0.0f);
+        color = vec3(0.0f) + 1.0f * powered_step_fac * float(globals.use_step_glow_on_background);
     }
 
     color = hdr_map_aces_tone(max(color, 0.0f));

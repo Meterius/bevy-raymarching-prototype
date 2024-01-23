@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdbool.h>
+
 #define CUDA_DEBUG false
 
 #define CONE_MARCH_LEVELS 2
@@ -50,6 +52,8 @@ struct Texture {
 struct GlobalsBuffer {
     unsigned long long tick;
     float time;
+    bool use_step_glow_on_background;
+    bool use_step_glow_on_foreground;
     unsigned int render_texture_size[2];
     float render_screen_size[2];
 };
@@ -74,7 +78,7 @@ struct SunLight {
 };
 
 enum SdPrimitiveVariant {
-    None, Sphere, Cube
+    None, Sphere, Cube, Mandelbulb
 };
 
 enum SdCompositionVariant {

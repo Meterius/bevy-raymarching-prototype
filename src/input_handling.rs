@@ -25,12 +25,27 @@ pub fn receive_input(
         compression_settings.enabled = !compression_settings.enabled;
     }
 
-    if keyboard_input.just_pressed(KeyCode::B) {
+    if keyboard_input.just_pressed(KeyCode::Y) {
         let toggle = !render_settings.enable_debug_gizmos;
         render_settings.enable_debug_gizmos = toggle;
         render_sprite
             .single_mut()
             .color
             .set_a(if toggle { 0.5 } else { 1.0 });
+    }
+
+    if keyboard_input.just_pressed(KeyCode::X) {
+        let (foreground, background) = match (
+            render_settings.enable_step_glow_on_foreground,
+            render_settings.enable_step_glow_on_background,
+        ) {
+            (false, false) => (false, true),
+            (false, true) => (true, false),
+            (true, false) => (true, true),
+            (true, true) => (false, false),
+        };
+
+        render_settings.enable_step_glow_on_foreground = foreground;
+        render_settings.enable_step_glow_on_background = background;
     }
 }

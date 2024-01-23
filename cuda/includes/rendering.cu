@@ -23,7 +23,7 @@ render_ray(
 
     RenderSurfaceData light_surface {};
 
-    float light = 2.0f;
+    float light = 1.0f;
     vec3 normal = sd_normal(hit.position, [&](vec3 p, float cd) { return sds_func(p, cd, surface); });
 
     for (int i = 0; i < 0 * lighting.sun_light_count; i++) {
@@ -37,8 +37,8 @@ render_ray(
 
     float looking_to_light = (1.0f + dot(-from_array(lighting.sun_lights[0].direction), normal)) * 0.5f;
 
-    surface.color = mix(
-        0.5f * (surface.color + vec3(0.0f, 0.0f, 1.0f)), 0.5f * (surface.color + vec3(1.0f, 0.0f, 0.0f)),
+    surface.color = 1.0f * mix(
+        surface.color * vec3(0.0f, 0.0f, 1.0f), surface.color * vec3(1.0f, 0.0f, 0.0f),
         looking_to_light
     );
 

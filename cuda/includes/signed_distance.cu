@@ -23,30 +23,29 @@ __device__ vec3 wrap(vec3 p, vec3 lower, vec3 higher) {
 
 // fractals
 
-#define POWER 8.0f
+#define POWER 7.0f
 
 __device__ float sd_mandelbulb(vec3 p, float time) {
-    glm::vec3 z = p;
+    vec3 z = p;
     float dr = 1.0f;
     float r;
 
     float power = POWER * (1.0f + time * 0.001f);
 
-    for (int i = 0; i < 20; i++) {
+    for (int i = 0; i < 25; i++) {
         r = length(z);
-        if (r > 4.0f) {
+        if (r > 2.0f) {
             break;
         }
 
         float theta = acos(z.z / r) * power;
         float phi = atan2(z.y, z.x) * power;
         float zr = pow(r, power);
-        dr = pow(r, power - 1) * power * dr + 1;
+        dr = pow(r, power - 1.0f) * power * dr + 1.0f;
 
         float s_theta = sin(theta);
-        z.x = glm::fma(zr, s_theta * cos(phi), p.x);
-        z.y = glm::fma(zr, sin(phi) * s_theta, p.y);
-        z.z = glm::fma(zr, cos(theta), p.z);
+        z = zr * vec3(s_theta * cos(phi), sin(phi) * s_theta, cos(theta));
+        z += p;
     }
 
     return 0.5f * log(r) * r / dr;
@@ -172,7 +171,7 @@ __device__ float sd_composition(
                 position, from_array(node.bound_min), from_array(node.bound_max)
             );
 
-            if (bound_distance > cd) {
+            if (bound_distance > cd + 1.0f) {
                 sd = bound_distance;
 
                 index = node.parent;
@@ -200,6 +199,10 @@ __device__ float sd_composition(
                     sd = sd_box(
                         position, center, scale
                     );
+                    break;
+
+                case SdPrimitiveVariant::Mandelbulb:
+                    sd = sd_mandelbulb((position - center) / (0.4f * scale), 0.0f) * 0.4f * minimum(scale);
                     break;
             }
 

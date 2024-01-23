@@ -5,6 +5,7 @@ use crate::bindings::cuda::{
     BLOCK_SIZE, CONE_MARCH_LEVELS, MAX_SUN_LIGHT_COUNT,
 };
 use crate::cudarc_extension::CustomCudaFunction;
+use crate::renderer::scene::RenderSceneSettings;
 use bevy::core_pipeline::clear_color::ClearColorConfig;
 use bevy::render::extract_resource::ExtractResource;
 use bevy::window::PrimaryWindow;
@@ -300,6 +301,7 @@ struct PreviousRenderParameter {
 }
 
 fn render(
+    settings: Res<RenderSceneSettings>,
     compression: Res<RenderConeCompression>,
     geometry: NonSend<RenderSceneGeometry>,
     time: Res<Time>,
@@ -361,6 +363,8 @@ fn render(
     // Render Parameters
 
     let globals = crate::bindings::cuda::GlobalsBuffer {
+        use_step_glow_on_foreground: settings.enable_step_glow_on_foreground,
+        use_step_glow_on_background: settings.enable_step_glow_on_background,
         time: time.elapsed_seconds(),
         tick: tick.clone(),
         render_texture_size: [RENDER_TEXTURE_SIZE.0 as u32, RENDER_TEXTURE_SIZE.1 as u32],

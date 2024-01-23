@@ -8,6 +8,7 @@ use std::collections::VecDeque;
 pub enum SdPrimitive {
     Sphere(f32),
     Box(Vec3),
+    Mandelbulb(f32),
 }
 
 impl Default for SdPrimitive {
@@ -53,6 +54,8 @@ pub struct RenderSceneStoredGeometry {
 #[reflect(Resource)]
 pub struct RenderSceneSettings {
     pub enable_debug_gizmos: bool,
+    pub enable_step_glow_on_foreground: bool,
+    pub enable_step_glow_on_background: bool,
 }
 
 #[derive(Default)]
@@ -67,6 +70,8 @@ impl Plugin for RenderScenePlugin {
             .insert_resource(RenderSceneStoredGeometry::default())
             .insert_resource(RenderSceneSettings {
                 enable_debug_gizmos: false,
+                enable_step_glow_on_background: false,
+                enable_step_glow_on_foreground: false,
             })
             .add_systems(PostUpdate, (compile_scene_geometry,));
     }
@@ -79,6 +84,7 @@ pub enum SdPrimitiveNodeVariant {
     #[default]
     Sphere,
     Cube,
+    Mandelbulb,
 }
 
 #[derive(Default, Clone, Debug)]
@@ -91,10 +97,7 @@ pub struct SdPrimitiveNode {
 impl SdPrimitiveNode {
     fn bounding_box(&self) -> (Vec3, Vec3) {
         return match self.variant {
-            SdPrimitiveNodeVariant::Sphere => {
-                (self.translation - self.scale, self.translation + self.scale)
-            }
-            SdPrimitiveNodeVariant::Cube => (
+            _ => (
                 self.translation - self.scale * 0.5,
                 self.translation + self.scale * 0.5,
             ),
@@ -451,11 +454,13 @@ fn collect_scene_geometry(
                 variant: match primitive {
                     SdPrimitive::Sphere(_) => SdPrimitiveNodeVariant::Sphere,
                     SdPrimitive::Box(_) => SdPrimitiveNodeVariant::Cube,
+                    SdPrimitive::Mandelbulb(_) => SdPrimitiveNodeVariant::Mandelbulb,
                 },
                 translation: trn.translation(),
                 scale: match primitive {
                     SdPrimitive::Sphere(radius) => Vec3::ONE * *radius,
                     SdPrimitive::Box(size) => size.clone(),
+                    SdPrimitive::Mandelbulb(radius) => Vec3::ONE * *radius,
                 },
             };
 
@@ -505,7 +510,7 @@ fn draw_bb_gizmos(gizmos: &mut Gizmos, node: &SdCompositionNode) {
     })
 }
 
-const PRINT_COMPILE_SCENE_GEOMETRY_INFO: bool = true;
+const PRINT_COMPILE_SCENE_GEOMETRY_INFO: bool = false;
 
 fn compile_scene_geometry(
     mut render_scene_stored: ResMut<RenderSceneStoredGeometry>,
@@ -607,6 +612,7 @@ fn compile_scene_geometry(
                 Some(primitive) => match primitive.variant {
                     SdPrimitiveNodeVariant::Cube => cuda::SdPrimitiveVariant_Cube,
                     SdPrimitiveNodeVariant::Sphere => cuda::SdPrimitiveVariant_Sphere,
+                    SdPrimitiveNodeVariant::Mandelbulb => cuda::SdPrimitiveVariant_Mandelbulb,
                 },
                 None => cuda::SdPrimitiveVariant_None,
             });

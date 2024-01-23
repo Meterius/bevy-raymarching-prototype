@@ -1,3 +1,4 @@
+use crate::example_scene::ExampleScenePlugin;
 use bevy::diagnostic::{EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
 use bevy::render::settings::{Backends, RenderCreation, WgpuSettings};
@@ -40,6 +41,7 @@ fn main() {
         renderer::RayMarcherRenderPlugin::default(),
         renderer::scene::RenderScenePlugin::default(),
         NoCameraPlayerPlugin,
+        ExampleScenePlugin::default(),
     ));
 
     app.add_systems(
