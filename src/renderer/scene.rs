@@ -475,8 +475,7 @@ fn compile_scene_geometry(
                 None => cuda::SdPrimitiveVariant_None,
             },
             parent: parent as i32,
-            child_leftmost: composition_children_index as i32,
-            child_rightmost: (composition_children_index + item.children.len() - 1) as i32,
+            child: composition_children_index as i32,
             bound_min: item.bounding_box.0.to_array(),
             bound_max: item.bounding_box.1.to_array(),
             ..default()

@@ -105,7 +105,7 @@ __device__ float sd_axes(vec3 p) {
 struct RuntimeStackNode {
     vec3 position;
     float sd;
-    int child_index;
+    bool second_child;
 };
 
 #define SD_RUNTIME_STACK_MAX_DEPTH 48
@@ -117,10 +117,12 @@ __device__ float sd_composition(
 ) {
     int stack_index = 0;
     int index = composition_index;
+
     float sd = 0.0f;
+    bool returning = false;
 
     RuntimeStackNode sd_runtime_stack[SD_RUNTIME_STACK_MAX_DEPTH];
-    sd_runtime_stack[stack_index] = { p, MAX_POSITIVE_F32, geometry.compositions[index].child_leftmost };
+    sd_runtime_stack[stack_index] = { p, MAX_POSITIVE_F32, false };
 
     while (stack_index >= 0) {
 #if CUDA_DEBUG == true
@@ -133,38 +135,65 @@ __device__ float sd_composition(
 
         vec3 position = stack_node->position;
 
-        float bound_distance = sd_simple_bounding_box(
-            position, from_array(node->bound_min), from_array(node->bound_max)
-        );
+        float bound_distance;
+        if (!returning) {
+            bound_distance = sd_simple_bounding_box(
+                position, from_array(node->bound_min), from_array(node->bound_max)
+            );
 
-        if (bound_distance > collision_distance[threadIdx.x]) {
-            sd = bound_distance;
+            if (bound_distance > collision_distance[threadIdx.x]) {
+                sd = bound_distance;
 
-            index = node->parent;
-            stack_index -= 1;
-        } else {
+                index = node->parent;
+                stack_index -= 1;
+                returning = true;
+                continue;
+            }
+        }
+
+        switch (node->variant) {
+            case SdCompositionVariant::Union:
+            case SdCompositionVariant::Difference:
+                break;
+        }
+
+        if (node->primitive_variant != SdPrimitiveVariant::None) {
+            vec3 scale = from_array(node->bound_max) - from_array(node->bound_min);
+
+            switch (node->primitive_variant) {
+                case SdPrimitiveVariant::None:
+                    break;
+
+                case SdPrimitiveVariant::Sphere:
+                    sd = sd_unit_sphere(
+                        (position - 0.5f * scale)
+                        / (from_array(node->bound_max) - from_array(node->bound_min))
+                    ) * minimum(scale);
+                    break;
+
+                case SdPrimitiveVariant::Cube:
+                    sd = bound_distance;
+                    break;
+            }
+
             switch (node->variant) {
                 case SdCompositionVariant::Union:
                 case SdCompositionVariant::Difference:
                     break;
             }
 
-            if (node->primitive_variant != SdPrimitiveVariant::None) {
-                vec3 scale = from_array(node->bound_max) - from_array(node->bound_min);
-
-                switch (node->primitive_variant) {
-                    case SdPrimitiveVariant::None:
+            index = node->parent;
+            stack_index -= 1;
+            returning = true;
+        } else {
+            if (returning && stack_node->second_child) {
+                switch (node->variant) {
+                    case SdCompositionVariant::Difference:
+                        sd = max(stack_node->sd, -sd);
                         break;
 
-                    case SdPrimitiveVariant::Sphere:
-                        sd = sd_unit_sphere(
-                            (position - 0.5f * scale)
-                            / (from_array(node->bound_max) - from_array(node->bound_min))
-                        ) * minimum(scale);
-                        break;
-
-                    case SdPrimitiveVariant::Cube:
-                        sd = bound_distance;
+                    case SdCompositionVariant::Union:
+                        sd = min(stack_node->sd, sd);
                         break;
                 }
 
@@ -176,39 +205,22 @@ __device__ float sd_composition(
 
                 index = node->parent;
                 stack_index -= 1;
+                returning = true;
             } else {
-                if (stack_node->child_index != node->child_leftmost) {
-                    switch (node->variant) {
-                        case SdCompositionVariant::Difference:
-                            sd_runtime_stack[stack_index].sd = max(sd_runtime_stack[stack_index].sd, -sd);
-                            break;
+                index = node->child;
 
-                        case SdCompositionVariant::Union:
-                            sd_runtime_stack[stack_index].sd = min(sd_runtime_stack[stack_index].sd, sd);
-                            break;
-                    }
+                if (returning) {
+                    stack_node->sd = sd;
+                    stack_node->second_child = true;
+                    index += 1;
                 }
 
-                if (stack_node->child_index > node->child_rightmost) {
-                    sd = sd_runtime_stack[stack_index].sd;
+                stack_index += 1;
+                returning = false;
 
-                    switch (node->variant) {
-                        case SdCompositionVariant::Union:
-                        case SdCompositionVariant::Difference:
-                            break;
-                    }
-
-                    index = node->parent;
-                    stack_index -= 1;
-                } else {
-                    index = sd_runtime_stack[stack_index].child_index;
-                    sd_runtime_stack[stack_index].child_index += 1;
-
-                    stack_index += 1;
-                    sd_runtime_stack[stack_index] = {
-                        position, MAX_POSITIVE_F32, geometry.compositions[index].child_leftmost
-                    };
-                }
+                sd_runtime_stack[stack_index] = {
+                    position, MAX_POSITIVE_F32, false
+                };
             }
         }
     }
