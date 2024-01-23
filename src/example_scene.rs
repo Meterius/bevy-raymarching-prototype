@@ -1,4 +1,4 @@
-use crate::renderer::scene::{SdPrimitive, SdVisual};
+use crate::renderer::scene::{SdComposition, SdPrimitive, SdVisual};
 use crate::renderer::RenderCameraTarget;
 use bevy::prelude::*;
 use bevy_flycam::FlyCam;
@@ -15,26 +15,39 @@ pub fn setup_scene(
 ) {
     let mut ss_random = StdRng::seed_from_u64(0);
 
-    commands.spawn((
-        SdPrimitive::Box(Vec3::new(5.0, 2.0, 1.0)),
-        SdVisual::default(),
-        SpatialBundle {
-            transform: Transform::from_xyz(0.0, 2.0, -0.5),
-            ..default()
-        },
-    ));
+    let child1 = commands
+        .spawn((
+            SdPrimitive::Box(Vec3::new(5.0, 2.0, 1.0)),
+            SpatialBundle {
+                transform: Transform::from_xyz(0.0, 0.0, -0.5),
+                ..default()
+            },
+        ))
+        .id();
 
-    commands.spawn((
-        SdPrimitive::Sphere(1.0),
-        SdVisual::default(),
-        SpatialBundle {
-            transform: Transform::from_xyz(0.0, 2.0, 0.0),
-            ..default()
-        },
-    ));
+    let child2 = commands
+        .spawn((
+            SdPrimitive::Sphere(1.0),
+            SpatialBundle {
+                transform: Transform::from_xyz(0.0, 0.0, 0.0),
+                ..default()
+            },
+        ))
+        .id();
 
-    if false {
-        for _ in 0..256 {
+    commands
+        .spawn((
+            SdComposition::Union(vec![child1, child2]),
+            SdVisual::default(),
+            SpatialBundle {
+                transform: Transform::from_xyz(0.0, 2.0, 0.0),
+                ..default()
+            },
+        ))
+        .push_children(&[child1, child2]);
+
+    if true {
+        for _ in 0..1 {
             let base = Vec3::new(
                 ss_random.gen::<f32>() * SAMPLE_SPHERE_CHUNK_DISTANCE
                     - SAMPLE_SPHERE_CHUNK_DISTANCE * 0.5,
@@ -44,7 +57,7 @@ pub fn setup_scene(
                     - SAMPLE_SPHERE_CHUNK_DISTANCE * 0.5,
             );
 
-            for _ in 0..128 {
+            for _ in 0..4 {
                 commands.spawn((
                     /*PbrBundle {
                         mesh: meshes.add(Mesh::from(shape::Cube { size: 0.5 })),

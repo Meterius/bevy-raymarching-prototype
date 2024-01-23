@@ -95,6 +95,7 @@ pub enum SdCompositionNodeVariant {
     #[default]
     Union,
     Difference,
+    Intersect,
 }
 
 #[derive(Debug)]
@@ -126,6 +127,25 @@ impl SdCompositionNode {
 
     fn total(&self) -> usize {
         return self.children.iter().fold(1, |x, child| x + child.total());
+    }
+
+    fn normalize(mut self) -> Self {
+        self.children = self
+            .children
+            .into_iter()
+            .map(|item| item.normalize())
+            .collect();
+
+        match self.variant {
+            SdCompositionNodeVariant::Primitive | SdCompositionNodeVariant::Difference => self,
+            SdCompositionNodeVariant::Union | SdCompositionNodeVariant::Intersect => {
+                if self.children.len() == 1 {
+                    self.children.remove(0)
+                } else {
+                    self
+                }
+            }
+        }
     }
 }
 
@@ -217,25 +237,27 @@ fn simple_center_split_reordering(node: &mut SdCompositionNode) {
 
     // only insert children if both are non-empty, if one of them is empty bounding boxes were all aligned and cannot be split
     if child_left.children.len() == 0 {
-        std::mem::swap(&mut node.children, &mut child_right.children);
+        child_left.children = child_right
+            .children
+            .split_off(child_right.children.len() / 2);
     } else if child_right.children.len() == 0 {
-        std::mem::swap(&mut node.children, &mut child_left.children);
-    } else {
-        // unwrap singular child nodes
-        let child_left = if child_left.children.len() == 1 {
-            child_left.children.remove(0)
-        } else {
-            child_left
-        };
-        let child_right = if child_right.children.len() == 1 {
-            child_right.children.remove(0)
-        } else {
-            child_right
-        };
-
-        node.children.push(child_left);
-        node.children.push(child_right);
+        child_right.children = child_left.children.split_off(child_left.children.len() / 2);
     }
+
+    // unwrap singular child nodes
+    let child_left = if child_left.children.len() == 1 {
+        child_left.children.remove(0)
+    } else {
+        child_left
+    };
+    let child_right = if child_right.children.len() == 1 {
+        child_right.children.remove(0)
+    } else {
+        child_right
+    };
+
+    node.children.push(child_left);
+    node.children.push(child_right);
 
     for child in node.children.iter_mut() {
         fill_scene_geometry_node_bounding_boxes(child);
@@ -294,8 +316,9 @@ fn fill_scene_geometry_non_leaf_bounding_boxes(node: &mut SdCompositionNode) {
 }
 
 fn collect_scene_geometry(
-    nodes: &Query<
+    nodes: &mut Query<
         (
+            Entity,
             &GlobalTransform,
             Option<&SdPrimitive>,
             Option<&SdComposition>,
@@ -304,10 +327,61 @@ fn collect_scene_geometry(
         Or<(With<SdPrimitive>, With<SdComposition>)>,
     >,
 ) -> SdCompositionNode {
-    let mut primitives = Vec::new();
+    let mut roots = Vec::new();
 
-    for (trn, primitive, _composition, _visual) in nodes.iter() {
-        if let Some(primitive) = primitive {
+    fn convert(
+        id: Entity,
+        nodes: &Query<
+            (
+                Entity,
+                &GlobalTransform,
+                Option<&SdPrimitive>,
+                Option<&SdComposition>,
+                Option<&SdVisual>,
+            ),
+            Or<(With<SdPrimitive>, With<SdComposition>)>,
+        >,
+    ) -> Option<SdCompositionNode> {
+        let (_, trn, primitive, composition, visual) = nodes.get(id).ok()?;
+
+        if let Some(composition) = composition {
+            match composition {
+                SdComposition::Union(children) => {
+                    return Some(SdCompositionNode {
+                        variant: SdCompositionNodeVariant::Union,
+                        children: children
+                            .iter()
+                            .filter_map(|child| convert(child.clone(), nodes))
+                            .collect(),
+                        ..default()
+                    });
+                }
+                SdComposition::Difference(children) => {
+                    return if children.len() == 0 {
+                        None
+                    } else if children.len() == 1 {
+                        convert(children[0].clone(), nodes)
+                    } else {
+                        convert(children[0].clone(), nodes).map(move |node| SdCompositionNode {
+                            variant: SdCompositionNodeVariant::Difference,
+                            children: vec![
+                                node,
+                                SdCompositionNode {
+                                    variant: SdCompositionNodeVariant::Union,
+                                    children: children
+                                        .iter()
+                                        .skip(1)
+                                        .filter_map(|child| convert(child.clone(), nodes))
+                                        .collect(),
+                                    ..default()
+                                },
+                            ],
+                            ..default()
+                        })
+                    }
+                }
+            }
+        } else if let Some(primitive) = primitive {
             let primitive_node = SdPrimitiveNode {
                 variant: match primitive {
                     SdPrimitive::Sphere(_) => SdPrimitiveNodeVariant::Sphere,
@@ -320,21 +394,30 @@ fn collect_scene_geometry(
                 },
             };
 
-            primitives.push(SdCompositionNode {
+            return Some(SdCompositionNode {
                 variant: SdCompositionNodeVariant::Primitive,
                 children: Vec::new(),
                 bounding_box: primitive_node.bounding_box(),
                 primitive: Some(primitive_node),
-            })
+            });
+        }
+
+        return None;
+    };
+
+    for (id, ..) in nodes.iter() {
+        if let Some(item) = convert(id, nodes) {
+            roots.push(item);
         }
     }
 
     return SdCompositionNode {
         variant: SdCompositionNodeVariant::Union,
         primitive: None,
-        children: primitives,
+        children: roots,
         bounding_box: (Vec3::NEG_INFINITY, Vec3::INFINITY),
-    };
+    }
+    .normalize();
 }
 
 fn draw_bb_gizmos(gizmos: &mut Gizmos, node: &SdCompositionNode) {
@@ -361,6 +444,7 @@ fn compile_scene_geometry(
     mut geometry: NonSendMut<RenderSceneGeometry>,
     mut nodes: Query<
         (
+            Entity,
             &GlobalTransform,
             Option<&SdPrimitive>,
             Option<&SdComposition>,
@@ -448,6 +532,7 @@ fn compile_scene_geometry(
             SdCompositionNodeVariant::Primitive => cuda::SdCompositionVariant_Union,
             SdCompositionNodeVariant::Union => cuda::SdCompositionVariant_Union,
             SdCompositionNodeVariant::Difference => cuda::SdCompositionVariant_Difference,
+            SdCompositionNodeVariant::Intersect => cuda::SdCompositionVariant_Intersect,
         });
 
         node.set_primitive_variant(match item.primitive {
