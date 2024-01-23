@@ -18,7 +18,7 @@ render_ray(
         { 0.0f, 0.0f, 0.0f }
     };
     RayMarchHit hit = ray_march<true>(
-        [&](vec3 p) { return sds_func(p, surface); }, ray, starting, cone_radius_at_unit
+        [&](vec3 p, float cd) { return sds_func(p, cd, surface); }, ray, starting, cone_radius_at_unit
     );
 
     float light = 0.3f;
@@ -29,11 +29,11 @@ render_ray(
         light_ray.position += light_ray.direction * 0.01f;
         light = max(
             0.05f,
-            soft_shadow_ray_march([&](vec3 p) { return sds_func(p, surface); }, light_ray, 0.1f)
+            soft_shadow_ray_march([&](vec3 p, float cd) { return sds_func(p, cd, surface); }, light_ray, 0.1f)
         );
     }
 
-    sds_func(hit.position, surface);
+    sds_func(hit.position, RAY_MARCH_COLLISION_DISTANCE, surface);
 
     return RayRender {
         hit, surface.color, light

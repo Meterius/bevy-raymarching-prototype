@@ -103,14 +103,20 @@ __device__ float sd_axes(vec3 p) {
 // runtime
 
 struct RuntimeStackNode {
-    vec3 position;
     float sd;
 };
 
+#define USE_SHARED_RUNTIME_STACK true
 #define SD_RUNTIME_STACK_MAX_DEPTH 48
+#define SD_SHARED_RUNTIME_STACK_MAX_DEPTH 18
+
+#if USE_SHARED_RUNTIME_STACK == true
+__shared__ RuntimeStackNode sd_runtime_stack[BLOCK_SIZE * SD_SHARED_RUNTIME_STACK_MAX_DEPTH];
+#endif
 
 __device__ float sd_composition(
     vec3 p,
+    float cd,
     SdRuntimeSceneGeometry geometry,
     int composition_index
 ) {
@@ -129,53 +135,70 @@ __device__ float sd_composition(
         second_child = (second_child & ~(1 << i)) | ((unsigned int) v << i);
     };
 
+#if USE_SHARED_RUNTIME_STACK == false
     RuntimeStackNode sd_runtime_stack[SD_RUNTIME_STACK_MAX_DEPTH];
-    sd_runtime_stack[stack_index] = { p, MAX_POSITIVE_F32 };
+#endif
+
+    const auto get_stack_node = [&](int i) {
+        return &sd_runtime_stack[
+#if USE_SHARED_RUNTIME_STACK == true
+threadIdx.x + i * BLOCK_SIZE
+#else
+            i
+#endif
+        ];
+    };
+
+    *get_stack_node(stack_index) = { MAX_POSITIVE_F32 };
 
     while (stack_index >= 0) {
 #if CUDA_DEBUG == true
         assert(stack_index >= 0);
-        assert(stack_index < SD_RUNTIME_STACK_MAX_DEPTH);
+#if USE_SHARED_RUNTIME_STACK == true
+            assert(stack_index < SD_SHARED_RUNTIME_STACK_MAX_DEPTH);
+#else
+            assert(stack_index < SD_RUNTIME_STACK_MAX_DEPTH);
+#endif
 #endif
 
-        SdComposition *node = &geometry.compositions[index];
-        RuntimeStackNode *stack_node = &sd_runtime_stack[stack_index];
+        SdComposition node = geometry.compositions[index];
+        RuntimeStackNode *stack_node = get_stack_node(stack_index);
 
-        vec3 position = stack_node->position;
+        vec3 position = p;
 
         float bound_distance;
         if (!returning) {
             bound_distance = sd_simple_bounding_box(
-                position, from_array(node->bound_min), from_array(node->bound_max)
+                position, from_array(node.bound_min), from_array(node.bound_max)
             );
 
-            if (bound_distance > collision_distance[threadIdx.x]) {
+            if (bound_distance > cd) {
                 sd = bound_distance;
 
-                index = node->parent;
+                index = node.parent;
                 stack_index -= 1;
                 returning = true;
                 continue;
             }
         }
 
-        switch (node->variant) {
+        switch (node.variant) {
             case SdCompositionVariant::Union:
             case SdCompositionVariant::Difference:
                 break;
         }
 
-        if (node->primitive_variant != SdPrimitiveVariant::None) {
-            vec3 scale = from_array(node->bound_max) - from_array(node->bound_min);
+        if (node.primitive_variant != SdPrimitiveVariant::None) {
+            vec3 scale = from_array(node.bound_max) - from_array(node.bound_min);
 
-            switch (node->primitive_variant) {
+            switch (node.primitive_variant) {
                 case SdPrimitiveVariant::None:
                     break;
 
                 case SdPrimitiveVariant::Sphere:
                     sd = sd_unit_sphere(
                         (position - 0.5f * scale)
-                        / (from_array(node->bound_max) - from_array(node->bound_min))
+                        / (from_array(node.bound_max) - from_array(node.bound_min))
                     ) * minimum(scale);
                     break;
 
@@ -184,18 +207,18 @@ __device__ float sd_composition(
                     break;
             }
 
-            switch (node->variant) {
+            switch (node.variant) {
                 case SdCompositionVariant::Union:
                 case SdCompositionVariant::Difference:
                     break;
             }
 
-            index = node->parent;
+            index = node.parent;
             stack_index -= 1;
             returning = true;
         } else {
             if (returning && get_second_child(stack_index)) {
-                switch (node->variant) {
+                switch (node.variant) {
                     case SdCompositionVariant::Difference:
                         sd = max(stack_node->sd, -sd);
                         break;
@@ -205,17 +228,17 @@ __device__ float sd_composition(
                         break;
                 }
 
-                switch (node->variant) {
+                switch (node.variant) {
                     case SdCompositionVariant::Union:
                     case SdCompositionVariant::Difference:
                         break;
                 }
 
-                index = node->parent;
+                index = node.parent;
                 stack_index -= 1;
                 returning = true;
             } else {
-                index = node->child;
+                index = node.child;
 
                 if (returning) {
                     stack_node->sd = sd;
@@ -226,8 +249,8 @@ __device__ float sd_composition(
                 stack_index += 1;
                 returning = false;
 
-                sd_runtime_stack[stack_index] = {
-                    position, MAX_POSITIVE_F32
+                *get_stack_node(stack_index) = {
+                    MAX_POSITIVE_F32
                 };
                 set_second_child(stack_index, false);
             }
@@ -241,9 +264,9 @@ __device__ float sd_composition(
 
 template<typename SFunc>
 __device__ auto make_generic_sds(SFunc sd_func, RenderSurfaceData surface) {
-    return [=](vec3 p, RenderSurfaceData &surface_output) {
-        float sd = sd_func(p);
-        if (sd <= SURFACE_DISTANCE) {
+    return [=](vec3 p, float cd, RenderSurfaceData &surface_output) {
+        float sd = sd_func(p, cd);
+        if (sd <= cd) {
             surface_output.color = surface.color;
         }
         return sd;
@@ -255,10 +278,10 @@ __device__ auto make_generic_location_dependent_sds(
     SFunc sd_func,
     SurfFunc surface_func
 ) {
-    return [surface_func, sd_func](vec3 p, RenderSurfaceData &surface_output) {
-        float sd = sd_func(p);
-        if (sd <= SURFACE_DISTANCE) {
-            surface_output = surface_func(p);
+    return [surface_func, sd_func](vec3 p, float cd, RenderSurfaceData &surface_output) {
+        float sd = sd_func(p, cd);
+        if (sd <= cd) {
+            surface_output = surface_func(p, cd);
         }
         return sd;
     };

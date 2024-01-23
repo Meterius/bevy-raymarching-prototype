@@ -6,7 +6,6 @@ use crate::bindings::cuda::{
 };
 use crate::cudarc_extension::CustomCudaFunction;
 use bevy::core_pipeline::clear_color::ClearColorConfig;
-use bevy::reflect::Array;
 use bevy::render::extract_resource::ExtractResource;
 use bevy::window::PrimaryWindow;
 use bevy::{prelude::*, render::render_resource::*};

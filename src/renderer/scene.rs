@@ -429,8 +429,10 @@ fn compile_scene_geometry(
             .unwrap()
     };
 
-    let mut queue = VecDeque::new();
+    let mut queue = VecDeque::<(i32, SdCompositionNode)>::new();
     queue.push_back((-1, root));
+
+    println!("{}", std::mem::size_of::<cuda::SdComposition>());
 
     while let Some((parent, item)) = queue.pop_front() {
         assert!(
@@ -438,48 +440,46 @@ fn compile_scene_geometry(
             "Must be leaf node or is binary, got {item:?}"
         );
 
-        geometry.compositions[composition_index] = cuda::SdComposition {
-            variant: match item.variant {
-                SdCompositionNodeVariant::Primitive => cuda::SdCompositionVariant_Union,
-                SdCompositionNodeVariant::Union => cuda::SdCompositionVariant_Union,
-                SdCompositionNodeVariant::Difference => cuda::SdCompositionVariant_Difference,
-            },
-            primitive: match item.primitive.as_ref() {
-                Some(primitive) => match primitive.variant {
-                    SdPrimitiveNodeVariant::Cube => cube_index as i32,
-                    SdPrimitiveNodeVariant::Sphere => sphere_index as i32,
-                },
-                None => 0,
-            },
-            primitive_variant: match item.primitive {
-                Some(primitive) => match primitive.variant {
-                    SdPrimitiveNodeVariant::Cube => {
-                        geometry.cubes[cube_index] = cuda::SdCubePrimitive {
-                            translation: primitive.translation.to_array(),
-                            scale: primitive.scale.to_array(),
-                        };
-                        cube_index += 1;
-
-                        cuda::SdPrimitiveVariant_Cube
-                    }
-                    SdPrimitiveNodeVariant::Sphere => {
-                        geometry.spheres[sphere_index] = cuda::SdSpherePrimitive {
-                            translation: primitive.translation.to_array(),
-                            scale: primitive.scale.to_array(),
-                        };
-                        sphere_index += 1;
-
-                        cuda::SdPrimitiveVariant_Sphere
-                    }
-                },
-                None => cuda::SdPrimitiveVariant_None,
-            },
-            parent: parent as i32,
-            child: composition_children_index as i32,
+        let mut node = cuda::SdComposition {
+            child: composition_children_index as _,
             bound_min: item.bounding_box.0.to_array(),
             bound_max: item.bounding_box.1.to_array(),
             ..default()
         };
+
+        node.set_parent(parent as _);
+
+        node.set_variant(match item.variant {
+            SdCompositionNodeVariant::Primitive => cuda::SdCompositionVariant_Union,
+            SdCompositionNodeVariant::Union => cuda::SdCompositionVariant_Union,
+            SdCompositionNodeVariant::Difference => cuda::SdCompositionVariant_Difference,
+        });
+
+        node.set_primitive_variant(match item.primitive {
+            Some(primitive) => match primitive.variant {
+                SdPrimitiveNodeVariant::Cube => {
+                    geometry.cubes[cube_index] = cuda::SdCubePrimitive {
+                        translation: primitive.translation.to_array(),
+                        scale: primitive.scale.to_array(),
+                    };
+                    cube_index += 1;
+
+                    cuda::SdPrimitiveVariant_Cube
+                }
+                SdPrimitiveNodeVariant::Sphere => {
+                    geometry.spheres[sphere_index] = cuda::SdSpherePrimitive {
+                        translation: primitive.translation.to_array(),
+                        scale: primitive.scale.to_array(),
+                    };
+                    sphere_index += 1;
+
+                    cuda::SdPrimitiveVariant_Sphere
+                }
+            },
+            None => cuda::SdPrimitiveVariant_None,
+        });
+
+        geometry.compositions[composition_index] = node;
 
         composition_children_index += item.children.len();
         queue.extend(

@@ -167,7 +167,7 @@ fn compile_cuda() {
         add_derive_extensions_to_structs(
             bindings.to_string().as_str(),
             &["SdSpherePrimitive", "SdCubePrimitive", "SdComposition"],
-            &["Default", "bevy::prelude::Reflect"],
+            &["Default"],
         )
         .as_str(),
     );

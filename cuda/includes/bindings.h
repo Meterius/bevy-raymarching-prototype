@@ -93,16 +93,13 @@ enum SdCompositionVariant {
 };
 
 struct SdComposition {
-    enum SdCompositionVariant variant;
-
-    enum SdPrimitiveVariant primitive_variant;
-    int primitive;
-
     float bound_max[3];
     float bound_min[3];
 
-    int child;
-    int parent;
+    unsigned int child;
+    unsigned int parent: 24;
+    enum SdCompositionVariant variant: 4;
+    enum SdPrimitiveVariant primitive_variant: 4;
 };
 
 struct SdRuntimeSceneLighting {

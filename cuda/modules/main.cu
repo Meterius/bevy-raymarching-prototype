@@ -94,29 +94,29 @@ __device__ SdRuntimeScene runtime_scene;
 
 __device__ auto make_sds_scene(GlobalsBuffer &globals, CameraBuffer &camera) {
     auto box_sds = make_generic_sds(
-        [](vec3 p) {
+        [](vec3 p, float cd) {
             return sd_box(p, vec3(-15.0f, 1.0f, 0.0f), vec3(1.0f, 2.0f, 10.0f));
         },
         RenderSurfaceData { vec3(1.0, 0.0, 0.0) }
     );
 
     auto runtime_scene_sds = make_generic_sds(
-        [](vec3 p) {
-            return sd_composition(p, runtime_scene.geometry, 0);
+        [](vec3 p, float cd) {
+            return sd_composition(p, cd, runtime_scene.geometry, 0);
         },
         RenderSurfaceData { vec3(0.0, 0.0, 1.0) }
     );
 
     auto plane_scene_sds = make_generic_sds(
-        [](vec3 p) {
+        [](vec3 p, float cd) {
             return sd_box(p, vec3(0.0f, -0.5f, 0.0f), vec3(50.0f, 1.0f, 50.0f));
         },
         RenderSurfaceData { vec3(0.3f, 0.4f, 0.2f) }
     );
 
     auto axes_scene_sds = make_generic_location_dependent_sds(
-        [](vec3 p) { return sd_axes(p); },
-        [](vec3 p) {
+        [](vec3 p, float cd) { return sd_axes(p); },
+        [](vec3 p, float cd) {
             vec3 color;
             color.x = (p.x > 0.25 ? 1.0f : (p.x < 0.25 ? 0.5f : 0.0f));
             color.y = (p.y > 0.25 ? 1.0f : (p.y < 0.25 ? 0.5f : 0.0f));
@@ -126,7 +126,7 @@ __device__ auto make_sds_scene(GlobalsBuffer &globals, CameraBuffer &camera) {
     );
 
     auto mandelbulb_scene_sds = make_generic_sds(
-        [&](vec3 p) {
+        [&](vec3 p, float cd) {
             const float scale = 100.0f;
             p /= scale;
             p.z = wrap(p.z, -1.0f, 1.0f);
@@ -136,14 +136,14 @@ __device__ auto make_sds_scene(GlobalsBuffer &globals, CameraBuffer &camera) {
         RenderSurfaceData { vec3(1.5f, 0.1f, 1.9f) }
     );
 
-    return [=](vec3 p, RenderSurfaceData &surface_output) {
-        float sd = box_sds(p, surface_output);
+    return [=](vec3 p, float cd, RenderSurfaceData &surface_output) {
+        float sd = box_sds(p, cd, surface_output);
 
         for (int i = 0; i < 0; i++) {
-            sd = min(sd, box_sds(p + vec3(5.0f * i, -10.0f, 0.0f), surface_output));
+            sd = min(sd, box_sds(p + vec3(5.0f * i, -10.0f, 0.0f), cd, surface_output));
         }
 
-        sd = min(runtime_scene_sds(p, surface_output), sd);
+        sd = min(runtime_scene_sds(p, cd, surface_output), sd);
         //sd = min(plane_scene_sds(p, surface_output), sd);
         // sd = min(mandelbulb_scene_sds(p, surface_output), sd);
         // sd = min(axes_scene_sds(p, surface_output), sd);
@@ -329,7 +329,7 @@ extern "C" __global__ void compute_compressed_depth(
     auto sds = make_sds_scene(globals, camera);
     RenderSurfaceData surface {};
     RayMarchHit hit = ray_march<true>(
-        [&surface, &sds](vec3 p) { return sds(p, surface); },
+        [&surface, &sds](vec3 p, float cd) { return sds(p, cd, surface); },
         ray,
         entry,
         cone_radius_at_unit
