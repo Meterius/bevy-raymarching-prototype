@@ -390,9 +390,6 @@ fn compile_scene_geometry(
 
     let start = std::time::Instant::now();
 
-    let mut cube_index: usize = 0;
-    let mut sphere_index: usize = 0;
-
     let mut composition_index: usize = 0;
     let mut composition_children_index: usize = 1;
 
@@ -455,24 +452,8 @@ fn compile_scene_geometry(
 
         node.set_primitive_variant(match item.primitive {
             Some(primitive) => match primitive.variant {
-                SdPrimitiveNodeVariant::Cube => {
-                    geometry.cubes[cube_index] = cuda::SdCubePrimitive {
-                        translation: primitive.translation.to_array(),
-                        scale: primitive.scale.to_array(),
-                    };
-                    cube_index += 1;
-
-                    cuda::SdPrimitiveVariant_Cube
-                }
-                SdPrimitiveNodeVariant::Sphere => {
-                    geometry.spheres[sphere_index] = cuda::SdSpherePrimitive {
-                        translation: primitive.translation.to_array(),
-                        scale: primitive.scale.to_array(),
-                    };
-                    sphere_index += 1;
-
-                    cuda::SdPrimitiveVariant_Sphere
-                }
+                SdPrimitiveNodeVariant::Cube => cuda::SdPrimitiveVariant_Cube,
+                SdPrimitiveNodeVariant::Sphere => cuda::SdPrimitiveVariant_Sphere,
             },
             None => cuda::SdPrimitiveVariant_None,
         });

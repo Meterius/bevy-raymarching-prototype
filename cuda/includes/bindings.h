@@ -77,16 +77,6 @@ enum SdPrimitiveVariant {
     None, Sphere, Cube
 };
 
-struct SdCubePrimitive {
-    float translation[3];
-    float scale[3];
-};
-
-struct SdSpherePrimitive {
-    float translation[3];
-    float scale[3];
-};
-
 enum SdCompositionVariant {
     Union,
     Difference // takes difference of first child against remaining children
@@ -108,8 +98,6 @@ struct SdRuntimeSceneLighting {
 };
 
 struct SdRuntimeSceneGeometry {
-    struct SdCubePrimitive *cube_primitives;
-    struct SdSpherePrimitive *sphere_primitives;
     struct SdComposition *compositions;
 };
 

@@ -15,7 +15,7 @@ pub fn setup_scene(
 ) {
     let mut ss_random = StdRng::seed_from_u64(0);
 
-    for _ in 0..128 {
+    for _ in 0..256 {
         let base = Vec3::new(
             ss_random.gen::<f32>() * SAMPLE_SPHERE_CHUNK_DISTANCE
                 - SAMPLE_SPHERE_CHUNK_DISTANCE * 0.5,

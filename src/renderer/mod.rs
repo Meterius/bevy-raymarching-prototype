@@ -1,8 +1,8 @@
 pub mod scene;
 
 use crate::bindings::cuda::{
-    ConeMarchTextureValue, RenderDataTextureValue, SdComposition, SdCubePrimitive,
-    SdRuntimeSceneGeometry, SdSpherePrimitive, BLOCK_SIZE, CONE_MARCH_LEVELS, MAX_SUN_LIGHT_COUNT,
+    ConeMarchTextureValue, RenderDataTextureValue, SdComposition, SdRuntimeSceneGeometry,
+    BLOCK_SIZE, CONE_MARCH_LEVELS, MAX_SUN_LIGHT_COUNT,
 };
 use crate::cudarc_extension::CustomCudaFunction;
 use bevy::core_pipeline::clear_color::ClearColorConfig;
@@ -15,8 +15,6 @@ use std::ffi::CString;
 use std::sync::Arc;
 
 const MAX_COMPOSITION_NODE_COUNT: usize = 131072;
-const MAX_CUBE_NODE_COUNT: usize = 65536;
-const MAX_SPHERE_NODE_COUNT: usize = 65536;
 
 const RENDER_TEXTURE_SIZE: (usize, usize) = (2560, 1440);
 
@@ -52,8 +50,6 @@ struct RenderTargetImage(Handle<Image>);
 #[derive(Clone, Debug)]
 struct RenderSceneGeometry {
     compositions: Box<[SdComposition; MAX_COMPOSITION_NODE_COUNT]>,
-    spheres: Box<[SdSpherePrimitive; MAX_SPHERE_NODE_COUNT]>,
-    cubes: Box<[SdCubePrimitive; MAX_CUBE_NODE_COUNT]>,
 }
 
 impl Default for RenderSceneGeometry {
@@ -61,14 +57,6 @@ impl Default for RenderSceneGeometry {
         Self {
             compositions: Box::try_from(
                 vec![SdComposition::default(); MAX_COMPOSITION_NODE_COUNT].into_boxed_slice(),
-            )
-            .unwrap(),
-            spheres: Box::try_from(
-                vec![SdSpherePrimitive::default(); MAX_SPHERE_NODE_COUNT].into_boxed_slice(),
-            )
-            .unwrap(),
-            cubes: Box::try_from(
-                vec![SdCubePrimitive::default(); MAX_CUBE_NODE_COUNT].into_boxed_slice(),
             )
             .unwrap(),
         }
@@ -95,8 +83,6 @@ struct RenderCudaBuffers {
 
     cm_texture_buffers: Vec<CudaSlice<ConeMarchTextureValue>>,
     compositions_buffer: CudaSlice<SdComposition>,
-    cube_primitive_buffer: CudaSlice<SdCubePrimitive>,
-    sphere_primitive_buffer: CudaSlice<SdSpherePrimitive>,
 }
 
 // App Systems
@@ -248,18 +234,6 @@ fn setup_cuda(world: &mut World) {
             .unwrap()
     };
 
-    let cube_primitive_buffer = unsafe {
-        device
-            .alloc::<SdCubePrimitive>(MAX_CUBE_NODE_COUNT)
-            .unwrap()
-    };
-
-    let sphere_primitive_buffer = unsafe {
-        device
-            .alloc::<SdSpherePrimitive>(MAX_SPHERE_NODE_COUNT)
-            .unwrap()
-    };
-
     let mut cm_texture_buffers = vec![];
 
     for i in 0..CONE_MARCH_LEVELS as usize {
@@ -294,8 +268,6 @@ fn setup_cuda(world: &mut World) {
         render_data_texture_buffer,
         cm_texture_buffers,
         compositions_buffer,
-        sphere_primitive_buffer,
-        cube_primitive_buffer,
     });
     world.insert_non_send_resource(PreviousRenderParameter::default());
     world.insert_non_send_resource(RenderSceneGeometry::default());
@@ -306,26 +278,6 @@ fn setup_cuda(world: &mut World) {
         cudarc::driver::sys::cuMemHostRegister_v2(
             geometry.compositions.as_mut_ptr() as *mut _,
             geometry.compositions.len() * std::mem::size_of::<SdComposition>(),
-            0,
-        )
-        .result()
-        .unwrap()
-    };
-
-    unsafe {
-        cudarc::driver::sys::cuMemHostRegister_v2(
-            geometry.spheres.as_mut_ptr() as *mut _,
-            geometry.spheres.len() * std::mem::size_of::<SdSpherePrimitive>(),
-            0,
-        )
-        .result()
-        .unwrap()
-    };
-
-    unsafe {
-        cudarc::driver::sys::cuMemHostRegister_v2(
-            geometry.cubes.as_mut_ptr() as *mut _,
-            geometry.cubes.len() * std::mem::size_of::<SdCubePrimitive>(),
             0,
         )
         .result()
@@ -399,24 +351,6 @@ fn render(
     };
 
     unsafe {
-        cudarc::driver::result::memcpy_htod_async(
-            render_buffers.sphere_primitive_buffer.device_ptr().clone(),
-            &geometry.spheres.as_slice(),
-            render_streams.render_stream.stream,
-        )
-        .unwrap()
-    };
-
-    unsafe {
-        cudarc::driver::result::memcpy_htod_async(
-            render_buffers.cube_primitive_buffer.device_ptr().clone(),
-            &geometry.cubes.as_slice(),
-            render_streams.render_stream.stream,
-        )
-        .unwrap()
-    };
-
-    unsafe {
         cudarc::driver::result::event::record(
             render_context.geometry_transferred_event.clone(),
             render_streams.render_stream.stream.clone(),
@@ -459,12 +393,6 @@ fn render(
         geometry: SdRuntimeSceneGeometry {
             compositions: unsafe {
                 std::mem::transmute(*(&render_buffers.compositions_buffer).device_ptr())
-            },
-            sphere_primitives: unsafe {
-                std::mem::transmute(*(&render_buffers.sphere_primitive_buffer).device_ptr())
-            },
-            cube_primitives: unsafe {
-                std::mem::transmute(*(&render_buffers.cube_primitive_buffer).device_ptr())
             },
         },
         lighting: crate::bindings::cuda::SdRuntimeSceneLighting {
