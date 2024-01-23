@@ -105,7 +105,6 @@ __device__ float sd_axes(vec3 p) {
 struct RuntimeStackNode {
     vec3 position;
     float sd;
-    bool second_child;
 };
 
 #define SD_RUNTIME_STACK_MAX_DEPTH 48
@@ -120,9 +119,18 @@ __device__ float sd_composition(
 
     float sd = 0.0f;
     bool returning = false;
+    unsigned int second_child = 0;
+
+    const auto get_second_child = [&](unsigned int i) {
+        return (bool) ((second_child >> i) & 1);
+    };
+
+    const auto set_second_child = [&](unsigned int i, bool v) {
+        second_child = (second_child & ~(1 << i)) | ((unsigned int) v << i);
+    };
 
     RuntimeStackNode sd_runtime_stack[SD_RUNTIME_STACK_MAX_DEPTH];
-    sd_runtime_stack[stack_index] = { p, MAX_POSITIVE_F32, false };
+    sd_runtime_stack[stack_index] = { p, MAX_POSITIVE_F32 };
 
     while (stack_index >= 0) {
 #if CUDA_DEBUG == true
@@ -186,7 +194,7 @@ __device__ float sd_composition(
             stack_index -= 1;
             returning = true;
         } else {
-            if (returning && stack_node->second_child) {
+            if (returning && get_second_child(stack_index)) {
                 switch (node->variant) {
                     case SdCompositionVariant::Difference:
                         sd = max(stack_node->sd, -sd);
@@ -211,7 +219,7 @@ __device__ float sd_composition(
 
                 if (returning) {
                     stack_node->sd = sd;
-                    stack_node->second_child = true;
+                    set_second_child(stack_index, true);
                     index += 1;
                 }
 
@@ -219,8 +227,9 @@ __device__ float sd_composition(
                 returning = false;
 
                 sd_runtime_stack[stack_index] = {
-                    position, MAX_POSITIVE_F32, false
+                    position, MAX_POSITIVE_F32
                 };
+                set_second_child(stack_index, false);
             }
         }
     }
