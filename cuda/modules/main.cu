@@ -104,7 +104,7 @@ __device__ auto make_sds_scene(GlobalsBuffer &globals, CameraBuffer &camera) {
         [](vec3 p, float cd) {
             return sd_composition(p, cd, runtime_scene.geometry, 0);
         },
-        RenderSurfaceData { vec3(0.0, 0.0, 1.0) }
+        RenderSurfaceData { vec3(0.4, 0.5, 0.2) }
     );
 
     auto plane_scene_sds = make_generic_sds(
@@ -137,13 +137,7 @@ __device__ auto make_sds_scene(GlobalsBuffer &globals, CameraBuffer &camera) {
     );
 
     return [=](vec3 p, float cd, RenderSurfaceData &surface_output) {
-        float sd = box_sds(p, cd, surface_output);
-
-        sd = min(runtime_scene_sds(p, cd, surface_output), sd);
-        //sd = min(plane_scene_sds(p, surface_output), sd);
-        // sd = min(mandelbulb_scene_sds(p, surface_output), sd);
-        // sd = min(axes_scene_sds(p, surface_output), sd);
-        return sd;
+        return runtime_scene_sds(p, cd, surface_output);
     };
 }
 
@@ -588,15 +582,16 @@ extern "C" __global__ void compute_render_finalize(
     vec3 color;
 
     if (texture_value.outcome == Collision) {
-        color = from_array(texture_value.color) * texture_value.light * (2.0f + vec3(texture_value.steps * 0.01f)) +
+        color = from_array(texture_value.color) * texture_value.light +
                 vec3(texture_value.depth * 0.0001f);
-        color = vec3(texture_value.depth * 0.00005f);
+        // color = from_array(texture_value.color);
+        // color = vec3(texture_value.depth * 0.00005f);
     } else if (texture_value.outcome == DepthLimit) {
         color = vec3(vec3(0.2f, 0.4f, 1.0f) * 3.0f * 0.0f + texture_value.steps * 0.01f);
-        color = vec3(4.0f);
+        color = vec3(0.0f);
     }
 
-    color = min(vec3(1.0), max(vec3(0.0), hdr_map_aces_tone(color)));
+    color = hdr_map_aces_tone(max(color, 0.0f));
     // color = vec3(texture_value.depth * 0.001f);
 
     unsigned int rgba = ((unsigned int) (255.0f * color.x) & 0xff) |

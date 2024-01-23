@@ -79,7 +79,8 @@ enum SdPrimitiveVariant {
 
 enum SdCompositionVariant {
     Union,
-    Difference // takes difference of first child against remaining children
+    Difference,
+    Intersect
 };
 
 struct SdComposition {

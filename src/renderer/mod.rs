@@ -105,7 +105,7 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     commands.spawn((
         SpriteBundle {
             sprite: Sprite {
-                color: Color::rgba(1.0, 1.0, 1.0, 0.5),
+                color: Color::rgba(1.0, 1.0, 1.0, 1.0),
                 custom_size: Some(Vec2::new(
                     RENDER_TEXTURE_SIZE.0 as f32,
                     RENDER_TEXTURE_SIZE.1 as f32,
@@ -396,7 +396,7 @@ fn render(
             },
         },
         lighting: crate::bindings::cuda::SdRuntimeSceneLighting {
-            sun_light_count: 0,
+            sun_light_count: 1,
             sun_lights: sun_lights.try_into().unwrap(),
         },
     };

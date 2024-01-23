@@ -15,39 +15,59 @@ pub fn setup_scene(
 ) {
     let mut ss_random = StdRng::seed_from_u64(0);
 
-    for _ in 0..256 {
-        let base = Vec3::new(
-            ss_random.gen::<f32>() * SAMPLE_SPHERE_CHUNK_DISTANCE
-                - SAMPLE_SPHERE_CHUNK_DISTANCE * 0.5,
-            ss_random.gen::<f32>() * SAMPLE_SPHERE_CHUNK_DISTANCE
-                - SAMPLE_SPHERE_CHUNK_DISTANCE * 0.5,
-            ss_random.gen::<f32>() * SAMPLE_SPHERE_CHUNK_DISTANCE
-                - SAMPLE_SPHERE_CHUNK_DISTANCE * 0.5,
-        );
+    commands.spawn((
+        SdPrimitive::Box(Vec3::new(5.0, 2.0, 1.0)),
+        SdVisual::default(),
+        SpatialBundle {
+            transform: Transform::from_xyz(0.0, 2.0, -0.5),
+            ..default()
+        },
+    ));
 
-        for _ in 0..128 {
-            commands.spawn((
-                /*PbrBundle {
-                    mesh: meshes.add(Mesh::from(shape::Cube { size: 0.5 })),
-                    material: materials.add(Color::rgb_u8(124, 144, 255).into()),
-                    ..default()
-                },*/
-                SpatialBundle {
-                    transform: Transform::from_translation(
-                        base + Vec3::new(
-                            ss_random.gen::<f32>() * SAMPLE_SPHERE_DISTANCE
-                                - SAMPLE_SPHERE_DISTANCE * 0.5,
-                            ss_random.gen::<f32>() * SAMPLE_SPHERE_DISTANCE
-                                - SAMPLE_SPHERE_DISTANCE * 0.5,
-                            ss_random.gen::<f32>() * SAMPLE_SPHERE_DISTANCE
-                                - SAMPLE_SPHERE_DISTANCE * 0.5,
+    commands.spawn((
+        SdPrimitive::Sphere(1.0),
+        SdVisual::default(),
+        SpatialBundle {
+            transform: Transform::from_xyz(0.0, 2.0, 0.0),
+            ..default()
+        },
+    ));
+
+    if false {
+        for _ in 0..256 {
+            let base = Vec3::new(
+                ss_random.gen::<f32>() * SAMPLE_SPHERE_CHUNK_DISTANCE
+                    - SAMPLE_SPHERE_CHUNK_DISTANCE * 0.5,
+                ss_random.gen::<f32>() * SAMPLE_SPHERE_CHUNK_DISTANCE
+                    - SAMPLE_SPHERE_CHUNK_DISTANCE * 0.5,
+                ss_random.gen::<f32>() * SAMPLE_SPHERE_CHUNK_DISTANCE
+                    - SAMPLE_SPHERE_CHUNK_DISTANCE * 0.5,
+            );
+
+            for _ in 0..128 {
+                commands.spawn((
+                    /*PbrBundle {
+                        mesh: meshes.add(Mesh::from(shape::Cube { size: 0.5 })),
+                        material: materials.add(Color::rgb_u8(124, 144, 255).into()),
+                        ..default()
+                    },*/
+                    SpatialBundle {
+                        transform: Transform::from_translation(
+                            base + Vec3::new(
+                                ss_random.gen::<f32>() * SAMPLE_SPHERE_DISTANCE
+                                    - SAMPLE_SPHERE_DISTANCE * 0.5,
+                                ss_random.gen::<f32>() * SAMPLE_SPHERE_DISTANCE
+                                    - SAMPLE_SPHERE_DISTANCE * 0.5,
+                                ss_random.gen::<f32>() * SAMPLE_SPHERE_DISTANCE
+                                    - SAMPLE_SPHERE_DISTANCE * 0.5,
+                            ),
                         ),
-                    ),
-                    ..default()
-                },
-                SdPrimitive::Sphere(0.25 + ss_random.gen::<f32>() * 1.75),
-                SdVisual::default(),
-            ));
+                        ..default()
+                    },
+                    SdPrimitive::Sphere(0.25 + ss_random.gen::<f32>() * 1.75),
+                    SdVisual::default(),
+                ));
+            }
         }
     }
 
@@ -65,8 +85,8 @@ pub fn setup_scene(
     // camera
     commands.spawn((
         Camera3dBundle {
-            transform: Transform::from_xyz(-50.0, 2.0, 5.0)
-                .looking_at(Vec3::new(0.0, 2.0, -40.0), Vec3::Y),
+            transform: Transform::from_xyz(5.0, 5.0, 5.0)
+                .looking_at(Vec3::new(0.0, 2.0, 0.0), Vec3::Y),
             ..default()
         },
         FlyCam,

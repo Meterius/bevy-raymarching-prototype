@@ -53,7 +53,7 @@ impl Plugin for RenderScenePlugin {
             .register_type::<SdVisual>()
             .register_type::<RenderSceneSettings>()
             .insert_resource(RenderSceneSettings {
-                enable_debug_gizmos: true,
+                enable_debug_gizmos: false,
             })
             .add_systems(PostUpdate, (compile_scene_geometry,));
     }

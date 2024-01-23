@@ -182,12 +182,6 @@ __device__ float sd_composition(
             }
         }
 
-        switch (node.variant) {
-            case SdCompositionVariant::Union:
-            case SdCompositionVariant::Difference:
-                break;
-        }
-
         if (node.primitive_variant != SdPrimitiveVariant::None) {
             vec3 scale = from_array(node.bound_max) - from_array(node.bound_min);
             vec3 center = 0.5f * (from_array(node.bound_max) + from_array(node.bound_min));
@@ -207,12 +201,6 @@ __device__ float sd_composition(
                     break;
             }
 
-            switch (node.variant) {
-                case SdCompositionVariant::Union:
-                case SdCompositionVariant::Difference:
-                    break;
-            }
-
             index = node.parent;
             stack_index -= 1;
             returning = true;
@@ -223,14 +211,12 @@ __device__ float sd_composition(
                         sd = max(stack_node->sd, -sd);
                         break;
 
+                    case SdCompositionVariant::Intersect:
+                        sd = max(stack_node->sd, sd);
+                        break;
+
                     case SdCompositionVariant::Union:
                         sd = min(stack_node->sd, sd);
-                        break;
-                }
-
-                switch (node.variant) {
-                    case SdCompositionVariant::Union:
-                    case SdCompositionVariant::Difference:
                         break;
                 }
 
@@ -288,23 +274,24 @@ __device__ auto make_generic_location_dependent_sds(
 }
 
 #define NORMAL_EPSILON 0.01f
+#define NORMAL_EPSILON_CD NORMAL_EPSILON * 4.0f
 
 template<typename SFunc>
 __device__ vec3 sd_normal(vec3 p, SFunc sd_func) {
-    float dx = (-sd_func(vec3(p.x + 2.0 * NORMAL_EPSILON, p.y, p.z)) +
-                8.0 * sd_func(vec3(p.x + NORMAL_EPSILON, p.y, p.z)) -
-                8.0 * sd_func(vec3(p.x - NORMAL_EPSILON, p.y, p.z)) +
-                sd_func(vec3(p.x - 2.0 * NORMAL_EPSILON, p.y, p.z)));
+    float dx = (-sd_func(vec3(p.x + 2.0f * NORMAL_EPSILON, p.y, p.z), NORMAL_EPSILON_CD) +
+                8.0f * sd_func(vec3(p.x + NORMAL_EPSILON, p.y, p.z), NORMAL_EPSILON_CD) -
+                8.0f * sd_func(vec3(p.x - NORMAL_EPSILON, p.y, p.z), NORMAL_EPSILON_CD) +
+                sd_func(vec3(p.x - 2.0f * NORMAL_EPSILON, p.y, p.z), NORMAL_EPSILON_CD));
 
-    float dy = (-sd_func(vec3(p.x, p.y + 2.0 * NORMAL_EPSILON, p.z)) +
-                8.0 * sd_func(vec3(p.x, p.y + NORMAL_EPSILON, p.z)) -
-                8.0 * sd_func(vec3(p.x, p.y - NORMAL_EPSILON, p.z)) +
-                sd_func(vec3(p.x, p.y - 2.0 * NORMAL_EPSILON, p.z)));
+    float dy = (-sd_func(vec3(p.x, p.y + 2.0f * NORMAL_EPSILON, p.z), NORMAL_EPSILON_CD) +
+                8.0f * sd_func(vec3(p.x, p.y + NORMAL_EPSILON, p.z), NORMAL_EPSILON_CD) -
+                8.0f * sd_func(vec3(p.x, p.y - NORMAL_EPSILON, p.z), NORMAL_EPSILON_CD) +
+                sd_func(vec3(p.x, p.y - 2.0f * NORMAL_EPSILON, p.z), NORMAL_EPSILON_CD));
 
-    float dz = (-sd_func(vec3(p.x, p.y, p.z + 2.0 * NORMAL_EPSILON)) +
-                8.0 * sd_func(vec3(p.x, p.y, p.z + NORMAL_EPSILON)) -
-                8.0 * sd_func(vec3(p.x, p.y, p.z - NORMAL_EPSILON)) +
-                sd_func(vec3(p.x, p.y, p.z - 2.0 * NORMAL_EPSILON)));
+    float dz = (-sd_func(vec3(p.x, p.y, p.z + 2.0f * NORMAL_EPSILON), NORMAL_EPSILON_CD) +
+                8.0f * sd_func(vec3(p.x, p.y, p.z + NORMAL_EPSILON), NORMAL_EPSILON_CD) -
+                8.0f * sd_func(vec3(p.x, p.y, p.z - NORMAL_EPSILON), NORMAL_EPSILON_CD) +
+                sd_func(vec3(p.x, p.y, p.z - 2.0f * NORMAL_EPSILON), NORMAL_EPSILON_CD));
 
     return normalize(vec3(dx, dy, dz));
 }
