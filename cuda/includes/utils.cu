@@ -1,6 +1,7 @@
 #pragma once
 
 #include "./libraries/glm/glm.hpp"
+#include "./libraries/glm/gtx/quaternion.hpp"
 
 using namespace glm;
 
@@ -19,6 +20,8 @@ __device__ float maximum(const vec3 p) { return max(max(p.x, p.y), p.z); }
 __device__ float maximum(const vec2 p) { return max(p.x, p.y); }
 
 __device__ vec3 from_array(const float p[3]) { return vec3(p[0], p[1], p[2]); }
+
+__device__ quat from_quat_array(const float p[4]) { return quat(p[0], p[1], p[2], p[3]); }
 
 template<uint32_t N>
 class BitSet {

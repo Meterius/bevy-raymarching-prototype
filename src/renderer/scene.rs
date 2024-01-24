@@ -94,15 +94,30 @@ pub struct SdPrimitiveNode {
     variant: SdPrimitiveNodeVariant,
     translation: Vec3,
     scale: Vec3,
+    rotation: Quat,
 }
 
 impl SdPrimitiveNode {
     fn bounding_box(&self) -> (Vec3, Vec3) {
         return match self.variant {
-            _ => (
-                self.translation - self.scale * 0.5,
-                self.translation + self.scale * 0.5,
-            ),
+            _ => {
+                let mut bb_min = Vec3::INFINITY;
+                let mut bb_max = Vec3::NEG_INFINITY;
+
+                for xi in 0..=1 {
+                    for yi in 0..=1 {
+                        for zi in 0..=1 {
+                            let p = self.rotation
+                                * (Vec3::new(-0.5 + xi as f32, -0.5 + yi as f32, -0.5 + zi as f32)
+                                    * self.scale);
+                            bb_min = bb_min.min(p);
+                            bb_max = bb_max.max(p);
+                        }
+                    }
+                }
+
+                return (bb_min + self.translation, bb_max + self.translation);
+            }
         };
     }
 }
@@ -200,6 +215,7 @@ impl SdCompositionNode {
                 variant: SdCompositionNodeVariant::Primitive(SdPrimitiveNode {
                     translation: Vec3::ZERO,
                     scale: Vec3::ONE,
+                    rotation: Quat::IDENTITY,
                     variant: SdPrimitiveNodeVariant::Empty,
                 }),
                 children: Vec::new(),
@@ -259,64 +275,62 @@ fn simple_bvh_reordering(node: &mut SdCompositionNode) {
 }
 
 fn simple_center_split_reordering(node: &mut SdCompositionNode) {
-    if node.children.len() <= 2 {
-        return;
-    }
+    if node.children.len() > 2 {
+        let mut axis = 0;
 
-    let mut axis = 0;
-
-    if node.bounding_box.1[axis] - node.bounding_box.0[axis]
-        < node.bounding_box.1[1] - node.bounding_box.0[1]
-    {
-        axis = 1;
-    }
-
-    if node.bounding_box.1[axis] - node.bounding_box.0[axis]
-        < node.bounding_box.1[2] - node.bounding_box.0[2]
-    {
-        axis = 2;
-    }
-
-    let mut child_left = SdCompositionNode::default();
-    let mut child_right = SdCompositionNode::default();
-
-    let center = (node.bounding_box.0[axis] + node.bounding_box.1[axis]) / 2.0;
-
-    let mut prev_children = Vec::new();
-
-    std::mem::swap(&mut prev_children, &mut node.children);
-
-    for child in prev_children.into_iter() {
-        if (child.bounding_box.1[axis] + child.bounding_box.0[axis]) / 2.0 > center {
-            child_left.children.push(child);
-        } else {
-            child_right.children.push(child);
+        if node.bounding_box.1[axis] - node.bounding_box.0[axis]
+            < node.bounding_box.1[1] - node.bounding_box.0[1]
+        {
+            axis = 1;
         }
+
+        if node.bounding_box.1[axis] - node.bounding_box.0[axis]
+            < node.bounding_box.1[2] - node.bounding_box.0[2]
+        {
+            axis = 2;
+        }
+
+        let mut child_left = SdCompositionNode::default();
+        let mut child_right = SdCompositionNode::default();
+
+        let center = (node.bounding_box.0[axis] + node.bounding_box.1[axis]) / 2.0;
+
+        let mut prev_children = Vec::new();
+
+        std::mem::swap(&mut prev_children, &mut node.children);
+
+        for child in prev_children.into_iter() {
+            if (child.bounding_box.1[axis] + child.bounding_box.0[axis]) / 2.0 > center {
+                child_left.children.push(child);
+            } else {
+                child_right.children.push(child);
+            }
+        }
+
+        // only insert children if both are non-empty, if one of them is empty bounding boxes were all aligned and cannot be split
+        if child_left.children.len() == 0 {
+            child_left.children = child_right
+                .children
+                .split_off(child_right.children.len() / 2);
+        } else if child_right.children.len() == 0 {
+            child_right.children = child_left.children.split_off(child_left.children.len() / 2);
+        }
+
+        // unwrap singular child nodes
+        let child_left = if child_left.children.len() == 1 {
+            child_left.children.remove(0)
+        } else {
+            child_left
+        };
+        let child_right = if child_right.children.len() == 1 {
+            child_right.children.remove(0)
+        } else {
+            child_right
+        };
+
+        node.children.push(child_left);
+        node.children.push(child_right);
     }
-
-    // only insert children if both are non-empty, if one of them is empty bounding boxes were all aligned and cannot be split
-    if child_left.children.len() == 0 {
-        child_left.children = child_right
-            .children
-            .split_off(child_right.children.len() / 2);
-    } else if child_right.children.len() == 0 {
-        child_right.children = child_left.children.split_off(child_left.children.len() / 2);
-    }
-
-    // unwrap singular child nodes
-    let child_left = if child_left.children.len() == 1 {
-        child_left.children.remove(0)
-    } else {
-        child_left
-    };
-    let child_right = if child_right.children.len() == 1 {
-        child_right.children.remove(0)
-    } else {
-        child_right
-    };
-
-    node.children.push(child_left);
-    node.children.push(child_right);
 
     for child in node.children.iter_mut() {
         fill_scene_geometry_node_bounding_boxes(child);
@@ -494,18 +508,21 @@ fn collect_scene_geometry(
                 }
             }
         } else if let Some(primitive) = primitive {
+            let trn_c = trn.compute_transform();
+
             let primitive_node = SdPrimitiveNode {
                 variant: match primitive {
                     SdPrimitive::Sphere(_) => SdPrimitiveNodeVariant::Sphere,
                     SdPrimitive::Box(_) => SdPrimitiveNodeVariant::Cube,
                     SdPrimitive::Mandelbulb(_) => SdPrimitiveNodeVariant::Mandelbulb,
                 },
-                translation: trn.translation(),
+                translation: trn_c.translation,
                 scale: match primitive {
                     SdPrimitive::Sphere(radius) => Vec3::ONE * *radius,
                     SdPrimitive::Box(size) => size.clone(),
                     SdPrimitive::Mandelbulb(radius) => Vec3::ONE * *radius,
-                },
+                } * trn_c.scale,
+                rotation: trn_c.rotation,
             };
 
             return Some(SdCompositionNode {
@@ -636,16 +653,34 @@ fn compile_scene_geometry(
                     SdCompositionNodeVariant::Primitive(_) => true,
                     _ => item.children.len() == 2,
                 },
-                "Must be leaf node or is binary, got {item:?}"
+                "Must be leaf node or is binary, got {item:?} with {} children",
+                item.children.len()
             );
 
             let mut node = cuda::SdComposition {
                 child: composition_children_index as _,
                 bound_min: item.bounding_box.0.to_array(),
                 bound_max: item.bounding_box.1.to_array(),
-                composition_par0: match &item.variant {
-                    SdCompositionNodeVariant::Mirror(_, dir) => dir.to_array(),
-                    _ => Vec3::ZERO.to_array(),
+                par0: match &item.variant {
+                    SdCompositionNodeVariant::Primitive(primitive) => [
+                        primitive.rotation.w,
+                        primitive.rotation.x,
+                        primitive.rotation.y,
+                        primitive.rotation.z,
+                    ],
+                    SdCompositionNodeVariant::Mirror(_, dir) => [dir.x, dir.y, dir.z, 0.0],
+                    _ => [0.0; 4],
+                },
+                par1: match &item.variant {
+                    SdCompositionNodeVariant::Primitive(primitive) => primitive.scale.to_array(),
+                    _ => [0.0; 3],
+                },
+                par2: match &item.variant {
+                    SdCompositionNodeVariant::Primitive(primitive) => {
+                        primitive.translation.to_array()
+                    }
+                    SdCompositionNodeVariant::Mirror(center, _) => center.to_array(),
+                    _ => [0.0; 3],
                 },
                 ..default()
             };

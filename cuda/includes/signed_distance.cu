@@ -4,6 +4,7 @@
 #include "../includes/types.cu"
 #include "../includes/utils.cu"
 #include "../includes/ray_marching.cu"
+#include "../includes/libraries/glm/gtx/quaternion.hpp"
 #include <assert.h>
 
 using namespace glm;
@@ -49,6 +50,10 @@ __device__ float sd_mandelbulb(vec3 p, float time) {
     }
 
     return 0.5f * log(r) * r / dr;
+}
+
+__device__ float sd_unit_mandelbulb(vec3 p) {
+    return sd_mandelbulb(p / 0.4f, 0.0f) * 0.4f;
 }
 
 // primitives
@@ -159,8 +164,7 @@ __device__ float sd_composition(
         SdComposition node = geometry.compositions[index];
         RuntimeStackNode *stack_node = get_stack_node(stack_index);
 
-        vec3 scale = from_array(node.bound_max) - from_array(node.bound_min);
-        vec3 center = 0.5f * (from_array(node.bound_max) + from_array(node.bound_min));
+        vec3 center = from_array(node.par2);
 
         float bound_distance;
         if (!returning) {
@@ -179,25 +183,25 @@ __device__ float sd_composition(
         }
 
         if (node.primitive_variant != SdPrimitiveVariant::None) {
+            quat rot = from_quat_array(node.par0);
+            vec3 scale = from_array(node.par1);
+            vec3 p = rotate(inverse(rot), (position - center)) / scale;
+
             switch (node.primitive_variant) {
                 case SdPrimitiveVariant::Empty:
                     sd = MAX_POSITIVE_F32;
                     break;
 
                 case SdPrimitiveVariant::Sphere:
-                    sd = sd_unit_sphere(
-                        (position - center) / scale
-                    ) * minimum(scale);
+                    sd = sd_unit_sphere(p) * minimum(scale);
                     break;
 
                 case SdPrimitiveVariant::Cube:
-                    sd = sd_box(
-                        position, center, scale
-                    );
+                    sd = sd_unit_cube(p) * minimum(scale);
                     break;
 
                 case SdPrimitiveVariant::Mandelbulb:
-                    sd = sd_mandelbulb((position - center) / (0.4f * scale), 0.0f) * 0.4f * minimum(scale);
+                    sd = sd_unit_mandelbulb(p) * minimum(scale);
                     break;
             }
 
@@ -224,8 +228,8 @@ __device__ float sd_composition(
                 switch (node.variant) {
                     case SdCompositionVariant::Mirror:
                         position = pos_mirrored.get(stack_index)
-                                   ? center - 2.0f * dot(position - center, from_array(node.composition_par0)) *
-                                              from_array(node.composition_par0)
+                                   ? center - 2.0f * dot(position - center, from_array(node.par0)) *
+                                              from_array(node.par0)
                                    : position;
                         break;
                 }
@@ -243,11 +247,11 @@ __device__ float sd_composition(
                 } else {
                     switch (node.variant) {
                         case SdCompositionVariant::Mirror: {
-                            float diff = dot(p - center, from_array(node.composition_par0));
+                            float diff = dot(p - center, from_array(node.par0));
 
                             pos_mirrored.set(stack_index, diff < 0.0f);
                             position =
-                                diff < 0.0f ? position - 2.0f * diff * from_array(node.composition_par0) : position;
+                                diff < 0.0f ? position - 2.0f * diff * from_array(node.par0) : position;
 
                             break;
                         }

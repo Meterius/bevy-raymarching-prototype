@@ -10,8 +10,8 @@ const SAMPLE_SPHERE_CHUNK_DISTANCE: f32 = 1000.0;
 
 pub fn setup_scene(
     mut commands: Commands,
-    _meshes: ResMut<Assets<Mesh>>,
-    _materials: ResMut<Assets<StandardMaterial>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let mut ss_random = StdRng::seed_from_u64(0);
 
@@ -20,9 +20,10 @@ pub fn setup_scene(
         let child1 = commands
             .spawn((
                 SdPrimitive::Box(Vec3::new(5.0, 2.0, 1.0)),
-                SpatialBundle {
-                    transform: Transform::from_xyz(0.0, 0.0, 0.0),
-                    ..default()
+                SpatialBundle::default(),
+                RotateAxisMotion {
+                    axis: Vec3::X,
+                    cycle_duration: 10.0,
                 },
             ))
             .id();
@@ -74,12 +75,23 @@ pub fn setup_scene(
 
     let box_id = commands
         .spawn((
-            bevy::core::Name::new("Box"),
-            SpatialBundle {
-                transform: Transform::from_xyz(0.0, -0.5, 0.0),
+            PbrBundle {
+                transform: Transform {
+                    translation: Vec3::new(5.0, -1.0, -2.0),
+                    scale: Vec3::new(4.0, 0.5, 2.0),
+                    ..default()
+                },
+                mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
+                material: materials.add(Color::rgb_u8(124, 144, 255).into()),
                 ..default()
             },
-            SdPrimitive::Box(Vec3::new(30.0, 1.0, 30.0)),
+            bevy::core::Name::new("Box"),
+            SdVisual::default(),
+            SdPrimitive::Box(Vec3::new(1.0, 1.0, 1.0)),
+            RotateAxisMotion {
+                axis: Vec3::X.normalize(),
+                cycle_duration: 5.0,
+            },
         ))
         .id();
 
@@ -93,18 +105,25 @@ pub fn setup_scene(
         },
         SdComposition::Mirror(mirrored),
         SdVisual::default(),
+        AxisCyclicMotion {
+            direction: Vec3::X * 15.0,
+            cycle_duration: 30.0,
+            ..default()
+        },
     ));
 
-    // commands.spawn((
-    //     SpatialBundle {
-    //         transform: Transform::from_xyz(-425.0, 0.0, 0.0),
-    //         ..default()
-    //     },
-    //     SdPrimitive::Mandelbulb(400.0),
-    //     SdVisual::default(),
-    // ));
+    commands.spawn((
+        SpatialBundle {
+            transform: Transform::from_xyz(-425.0, 0.0, 0.0),
+            ..default()
+        },
+        SdPrimitive::Mandelbulb(400.0),
+        SdVisual::default(),
+    ));
 
-    if false {
+    if true {
+        let mut sphere_clouds = Vec::new();
+
         commands
             .spawn((
                 SpatialBundle::default(),
@@ -122,48 +141,63 @@ pub fn setup_scene(
                     );
 
                     for _ in 0..64 {
-                        commands.spawn((
-                            /*PbrBundle {
-                                mesh: meshes.add(Mesh::from(shape::Cube { size: 0.5 })),
-                                material: materials.add(Color::rgb_u8(124, 144, 255).into()),
-                                ..default()
-                            },*/
-                            SpatialBundle {
-                                transform: Transform::from_translation(
-                                    base + Vec3::new(
-                                        ss_random.gen::<f32>() * SAMPLE_SPHERE_DISTANCE
-                                            - SAMPLE_SPHERE_DISTANCE * 0.5,
-                                        ss_random.gen::<f32>() * SAMPLE_SPHERE_DISTANCE
-                                            - SAMPLE_SPHERE_DISTANCE * 0.5,
-                                        ss_random.gen::<f32>() * SAMPLE_SPHERE_DISTANCE
-                                            - SAMPLE_SPHERE_DISTANCE * 0.5,
-                                    ),
-                                ),
-                                ..default()
-                            },
-                            SdPrimitive::Sphere(0.25 + ss_random.gen::<f32>() * 1.75),
-                            SdVisual { enabled: false },
-                            SphericCyclicMotion {
-                                distances: 50.0
-                                    * Vec3::new(
-                                        ss_random.gen::<f32>(),
-                                        ss_random.gen::<f32>(),
-                                        ss_random.gen::<f32>(),
-                                    ),
-                                cycle_durations: 10.0 * Vec3::ONE
-                                    + 30.0
-                                        * Vec3::new(
-                                            ss_random.gen::<f32>(),
-                                            ss_random.gen::<f32>(),
-                                            ss_random.gen::<f32>(),
+                        sphere_clouds.push(
+                            commands
+                                .spawn((
+                                    /*PbrBundle {
+                                        mesh: meshes.add(Mesh::from(shape::Cube { size: 0.5 })),
+                                        material: materials.add(Color::rgb_u8(124, 144, 255).into()),
+                                        ..default()
+                                    },*/
+                                    SpatialBundle {
+                                        transform: Transform::from_translation(
+                                            base + Vec3::new(
+                                                ss_random.gen::<f32>() * SAMPLE_SPHERE_DISTANCE
+                                                    - SAMPLE_SPHERE_DISTANCE * 0.5,
+                                                ss_random.gen::<f32>() * SAMPLE_SPHERE_DISTANCE
+                                                    - SAMPLE_SPHERE_DISTANCE * 0.5,
+                                                ss_random.gen::<f32>() * SAMPLE_SPHERE_DISTANCE
+                                                    - SAMPLE_SPHERE_DISTANCE * 0.5,
+                                            ),
                                         ),
-                                ..default()
-                            },
-                            TogglableVisual::default(),
-                        ));
+                                        ..default()
+                                    },
+                                    SdPrimitive::Sphere(0.25 + ss_random.gen::<f32>() * 1.75),
+                                    SdVisual { enabled: false },
+                                    SphericCyclicMotion {
+                                        distances: 50.0
+                                            * Vec3::new(
+                                                ss_random.gen::<f32>(),
+                                                ss_random.gen::<f32>(),
+                                                ss_random.gen::<f32>(),
+                                            ),
+                                        cycle_durations: 10.0 * Vec3::ONE
+                                            + 30.0
+                                                * Vec3::new(
+                                                    ss_random.gen::<f32>(),
+                                                    ss_random.gen::<f32>(),
+                                                    ss_random.gen::<f32>(),
+                                                ),
+                                        ..default()
+                                    },
+                                    TogglableVisual::default(),
+                                ))
+                                .id(),
+                        );
                     }
                 }
             });
+
+        commands.spawn((
+            bevy::core::Name::new("Cloud Sphere Mirror"),
+            SpatialBundle {
+                transform: Transform::from_translation(Vec3::ZERO)
+                    .looking_at(Vec3::new(1.0, 1.0, 1.0), Vec3::Y),
+                ..default()
+            },
+            SdComposition::Mirror(sphere_clouds),
+            SdVisual::default(),
+        ));
     }
 
     /*    // light
@@ -191,6 +225,12 @@ pub fn setup_scene(
         FlyCam,
         RenderCameraTarget::default(),
     ));
+}
+
+#[derive(Debug, Clone, Component)]
+pub struct RotateAxisMotion {
+    axis: Vec3,
+    cycle_duration: f32,
 }
 
 #[derive(Debug, Clone, Component)]
@@ -249,21 +289,33 @@ fn set_center(
 
 fn apply_motion(
     time: Res<Time>,
-    mut motions: Query<(&mut Transform, &AxisCyclicMotion), Without<SphericCyclicMotion>>,
-    mut sphere_motions: Query<(&mut Transform, &SphericCyclicMotion), Without<AxisCyclicMotion>>,
+    mut motions: Query<(
+        &mut Transform,
+        Option<&AxisCyclicMotion>,
+        Option<&SphericCyclicMotion>,
+        Option<&RotateAxisMotion>,
+    )>,
 ) {
-    for (mut trn, mot) in motions.iter_mut() {
-        trn.translation = mot.center.unwrap_or_default()
-            + mot.direction
-                * (2.0 * std::f32::consts::PI * time.elapsed_seconds() / mot.cycle_duration).sin();
-    }
+    for (mut trn, ax_mot, sp_mot, rot_mot) in motions.iter_mut() {
+        if let Some(ax_mot) = ax_mot {
+            trn.translation = ax_mot.center.unwrap_or_default()
+                + ax_mot.direction
+                    * (2.0 * std::f32::consts::PI * time.elapsed_seconds() / ax_mot.cycle_duration)
+                        .sin();
+        } else if let Some(sp_mot) = sp_mot {
+            let d = Vec3::ONE * 2.0 * std::f32::consts::PI * time.elapsed_seconds()
+                / sp_mot.cycle_durations;
 
-    for (mut trn, mot) in sphere_motions.iter_mut() {
-        let d =
-            Vec3::ONE * 2.0 * std::f32::consts::PI * time.elapsed_seconds() / mot.cycle_durations;
+            trn.translation = sp_mot.center.unwrap_or_default()
+                + sp_mot.distances * Vec3::new(d.x.sin(), d.y.sin(), d.z.sin());
+        }
 
-        trn.translation = mot.center.unwrap_or_default()
-            + mot.distances * Vec3::new(d.x.sin(), d.y.sin(), d.z.sin());
+        if let Some(rot_mot) = rot_mot {
+            trn.rotation = Quat::from_axis_angle(
+                rot_mot.axis,
+                2.0 * std::f32::consts::PI * (time.elapsed_seconds() / rot_mot.cycle_duration),
+            );
+        }
     }
 }
 
