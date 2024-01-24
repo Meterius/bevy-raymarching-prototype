@@ -21,10 +21,6 @@ pub fn setup_scene(
             .spawn((
                 SdPrimitive::Box(Vec3::new(5.0, 2.0, 1.0)),
                 SpatialBundle::default(),
-                RotateAxisMotion {
-                    axis: Vec3::X,
-                    cycle_duration: 10.0,
-                },
             ))
             .id();
 
@@ -33,10 +29,6 @@ pub fn setup_scene(
                 SdPrimitive::Sphere(2.0),
                 SpatialBundle {
                     transform: Transform::from_xyz(0.0, 0.0, 0.0),
-                    ..default()
-                },
-                AxisCyclicMotion {
-                    direction: Vec3::new(0.0, 0.0, 1.75),
                     ..default()
                 },
             ))

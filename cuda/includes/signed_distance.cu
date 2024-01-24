@@ -185,7 +185,7 @@ __device__ float sd_composition(
         if (node.primitive_variant != SdPrimitiveVariant::None) {
             quat rot = from_quat_array(node.par0);
             vec3 scale = from_array(node.par1);
-            vec3 p = rotate(inverse(rot), (position - center)) / scale;
+            vec3 p = rotate(inverse(rot), (position - center));
 
             switch (node.primitive_variant) {
                 case SdPrimitiveVariant::Empty:
@@ -193,15 +193,15 @@ __device__ float sd_composition(
                     break;
 
                 case SdPrimitiveVariant::Sphere:
-                    sd = sd_unit_sphere(p) * minimum(scale);
+                    sd = sd_unit_sphere(p / scale) * minimum(scale);
                     break;
 
                 case SdPrimitiveVariant::Cube:
-                    sd = sd_unit_cube(p) * minimum(scale);
+                    sd = sd_box(p, vec3(0.0), scale);
                     break;
 
                 case SdPrimitiveVariant::Mandelbulb:
-                    sd = sd_unit_mandelbulb(p) * minimum(scale);
+                    sd = sd_unit_mandelbulb(p / scale) * minimum(scale);
                     break;
             }
 
