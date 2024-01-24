@@ -1,7 +1,7 @@
 #include "../includes/libraries/glm/glm.hpp"
 #include "../includes/bindings.h"
 #include "../includes/color.cu"
-#include "../includes/utils.h"
+#include "../includes/utils.cu"
 #include "../includes/signed_distance.cu"
 #include "../includes/rendering.cu"
 #include "../includes/ray_marching.cu"

@@ -2,7 +2,7 @@
 
 #include "../includes/libraries/glm/glm.hpp"
 #include "../includes/types.cu"
-#include "../includes/utils.h"
+#include "../includes/utils.cu"
 #include "../includes/ray_marching.cu"
 #include <assert.h>
 
@@ -124,15 +124,8 @@ __device__ float sd_composition(
 
     float sd = 0.0f;
     bool returning = false;
-    unsigned int second_child = 0;
 
-    const auto get_second_child = [&](unsigned int i) {
-        return (bool) ((second_child >> i) & 1);
-    };
-
-    const auto set_second_child = [&](unsigned int i, bool v) {
-        second_child = (second_child & ~(1 << i)) | ((unsigned int) v << i);
-    };
+    BitSet<32> second_child {};
 
 #if USE_SHARED_RUNTIME_STACK == false
     RuntimeStackNode sd_runtime_stack[SD_RUNTIME_STACK_MAX_DEPTH];
@@ -181,10 +174,10 @@ __device__ float sd_composition(
             }
         }
 
-        if (node.primitive_variant != SdPrimitiveVariant::None) {
-            vec3 scale = from_array(node.bound_max) - from_array(node.bound_min);
-            vec3 center = 0.5f * (from_array(node.bound_max) + from_array(node.bound_min));
+        vec3 scale = from_array(node.bound_max) - from_array(node.bound_min);
+        vec3 center = 0.5f * (from_array(node.bound_max) + from_array(node.bound_min));
 
+        if (node.primitive_variant != SdPrimitiveVariant::None) {
             switch (node.primitive_variant) {
                 case SdPrimitiveVariant::None:
                     break;
@@ -210,7 +203,7 @@ __device__ float sd_composition(
             stack_index -= 1;
             returning = true;
         } else {
-            if (returning && get_second_child(stack_index)) {
+            if (returning && second_child.get(stack_index)) {
                 switch (node.variant) {
                     case SdCompositionVariant::Difference:
                         sd = max(stack_node->sd, -sd);
@@ -233,7 +226,7 @@ __device__ float sd_composition(
 
                 if (returning) {
                     stack_node->sd = sd;
-                    set_second_child(stack_index, true);
+                    second_child.set(stack_index, true);
                     index += 1;
                 }
 
@@ -243,7 +236,7 @@ __device__ float sd_composition(
                 *get_stack_node(stack_index) = {
                     MAX_POSITIVE_F32
                 };
-                set_second_child(stack_index, false);
+                second_child.set(stack_index, false);
             }
         }
     }
