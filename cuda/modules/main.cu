@@ -520,7 +520,7 @@ extern "C" __global__ void compute_render_finalize(
 
     float blended_steps = 0.0f;
 
-    if (compression_enabled && true) {
+    if (compression_enabled && false) {
         float total = 0.0f;
 
         for (int i = -STEP_GAUSSIAN_SIZE; i <= STEP_GAUSSIAN_SIZE; i++) {

@@ -29,7 +29,7 @@ pub fn setup_scene(
 
         let child2 = commands
             .spawn((
-                SdPrimitive::Sphere(1.0),
+                SdPrimitive::Sphere(2.0),
                 SpatialBundle {
                     transform: Transform::from_xyz(0.0, 0.0, 0.0),
                     ..default()
@@ -135,6 +135,7 @@ pub fn setup_scene(
                                 ),
                         ..default()
                     },
+                    TogglableVisual::default(),
                 ));
             }
         }
@@ -154,6 +155,10 @@ pub fn setup_scene(
     // camera
     commands.spawn((
         Camera3dBundle {
+            camera: Camera {
+                is_active: false,
+                ..default()
+            },
             transform: Transform::from_xyz(5.0, 5.0, -5.0)
                 .looking_at(Vec3::new(0.0, 2.0, 0.0), Vec3::Y),
             ..default()
@@ -179,6 +184,9 @@ impl Default for SphericCyclicMotion {
         }
     }
 }
+
+#[derive(Debug, Default, Clone, Component)]
+pub struct TogglableVisual {}
 
 #[derive(Debug, Clone, Component)]
 pub struct AxisCyclicMotion {

@@ -1,10 +1,19 @@
-use crate::renderer::scene::RenderSceneSettings;
-use crate::renderer::{RenderConeCompression, RenderTargetSprite};
+use crate::example_scene::TogglableVisual;
+use crate::renderer::scene::{RenderSceneSettings, SdVisual};
+use crate::renderer::{RenderCameraTarget, RenderConeCompression, RenderRelayCameraTarget};
 use bevy::{app::AppExit, prelude::*};
 use bevy_flycam::MovementSettings;
 
 pub fn receive_input(
-    mut render_sprite: Query<&mut Sprite, With<RenderTargetSprite>>,
+    mut togglable_visuals: Query<&mut SdVisual, With<TogglableVisual>>,
+    mut relay_camera: Query<
+        &mut Camera,
+        (With<RenderRelayCameraTarget>, Without<RenderCameraTarget>),
+    >,
+    mut render_camera: Query<
+        &mut Camera,
+        (With<RenderCameraTarget>, Without<RenderRelayCameraTarget>),
+    >,
     mut movement_settings: ResMut<MovementSettings>,
     mut compression_settings: ResMut<RenderConeCompression>,
     mut render_settings: ResMut<RenderSceneSettings>,
@@ -28,10 +37,8 @@ pub fn receive_input(
     if keyboard_input.just_pressed(KeyCode::Y) {
         let toggle = !render_settings.enable_debug_gizmos;
         render_settings.enable_debug_gizmos = toggle;
-        render_sprite
-            .single_mut()
-            .color
-            .set_a(if toggle { 0.5 } else { 1.0 });
+        relay_camera.single_mut().is_active = !toggle;
+        render_camera.single_mut().is_active = toggle;
     }
 
     if keyboard_input.just_pressed(KeyCode::X) {
@@ -47,5 +54,11 @@ pub fn receive_input(
 
         render_settings.enable_step_glow_on_foreground = foreground;
         render_settings.enable_step_glow_on_background = background;
+    }
+
+    if keyboard_input.just_pressed(KeyCode::V) {
+        for mut vis in togglable_visuals.iter_mut() {
+            vis.enabled = !vis.enabled;
+        }
     }
 }

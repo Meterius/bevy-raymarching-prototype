@@ -42,6 +42,9 @@ impl Default for RenderConeCompression {
 #[derive(Debug, Clone, Default, Component)]
 pub struct RenderCameraTarget {}
 
+#[derive(Debug, Clone, Default, Component)]
+pub struct RenderRelayCameraTarget {}
+
 #[derive(Clone, Debug, Default, Component)]
 pub struct RenderTargetSprite {}
 
@@ -118,17 +121,20 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
         },
         RenderTargetSprite::default(),
     ));
-    commands.spawn(Camera2dBundle {
-        camera: Camera {
-            order: 1,
+    commands.spawn((
+        Camera2dBundle {
+            camera: Camera {
+                order: 1,
+                ..default()
+            },
+            camera_2d: Camera2d {
+                clear_color: ClearColorConfig::None,
+                ..default()
+            },
             ..default()
         },
-        camera_2d: Camera2d {
-            clear_color: ClearColorConfig::None,
-            ..default()
-        },
-        ..default()
-    });
+        RenderRelayCameraTarget::default(),
+    ));
 
     commands.insert_resource(RenderTargetImage(image));
 }
