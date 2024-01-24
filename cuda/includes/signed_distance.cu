@@ -59,7 +59,7 @@ __device__ float sd_unit_mandelbulb(vec3 p) {
 // primitives
 
 __device__ float sd_unit_sphere(vec3 p) {
-    return length(p) - 0.5;
+    return length(p) - 0.5f;
 }
 
 __device__ float sd_box(vec3 p, vec3 bp, vec3 bs) {
@@ -197,7 +197,7 @@ __device__ float sd_composition(
                     break;
 
                 case SdPrimitiveVariant::Cube:
-                    sd = sd_box(p, vec3(0.0), scale);
+                    sd = sd_box(p, vec3(0.0f), scale);
                     break;
 
                 case SdPrimitiveVariant::Mandelbulb:

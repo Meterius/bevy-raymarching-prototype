@@ -100,9 +100,11 @@ fn compile_cuda() {
             nvcc_cmd.arg("--use_fast_math");
             nvcc_cmd.arg("-Xptxas=\"-v\"");
             nvcc_cmd.arg("-Xptxas=\"-o=3\"");
+            nvcc_cmd.arg("-Xptxas=\"-warn-double-usage\"");
         } else {
             nvcc_cmd.arg("--use_fast_math");
             nvcc_cmd.arg("-Xptxas=\"-o=3\"");
+            nvcc_cmd.arg("-Xptxas=\"-warn-double-usage\"");
         }
 
         println!("{nvcc_cmd:?}");

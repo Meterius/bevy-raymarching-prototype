@@ -97,14 +97,14 @@ __device__ auto make_sds_scene(GlobalsBuffer &globals, CameraBuffer &camera) {
         [](vec3 p, float cd) {
             return sd_box(p, vec3(-15.0f, 1.0f, 0.0f), vec3(1.0f, 2.0f, 10.0f));
         },
-        RenderSurfaceData { vec3(1.0, 0.0, 0.0) }
+        RenderSurfaceData { vec3(1.0f, 0.0f, 0.0f) }
     );
 
     auto runtime_scene_sds = make_generic_sds(
         [](vec3 p, float cd) {
             return sd_composition(p, cd, runtime_scene.geometry, 0);
         },
-        RenderSurfaceData { vec3(0.4, 0.5, 0.2) }
+        RenderSurfaceData { vec3(0.4f, 0.5f, 0.2f) }
     );
 
     auto plane_scene_sds = make_generic_sds(
@@ -583,8 +583,8 @@ extern "C" __global__ void compute_render_finalize(
 
     float geo_step_fac = texture_value.steps / (RAY_MARCH_STEP_LIMIT * 0.1f);
     float step_fac = texture_value.steps / (RAY_MARCH_STEP_LIMIT * 0.5f);
-    float geo_powered_step_fac = pow(geo_step_fac, 3.0);
-    float powered_step_fac = pow(step_fac, 3.0);
+    float geo_powered_step_fac = pow(geo_step_fac, 3.0f);
+    float powered_step_fac = pow(step_fac, 3.0f);
 
     if (texture_value.outcome == Collision) {
         color = from_array(texture_value.color) * texture_value.light *
