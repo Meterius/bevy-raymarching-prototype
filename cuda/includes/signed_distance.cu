@@ -163,16 +163,7 @@ __device__ float sd_composition(
         vec3 center = 0.5f * (from_array(node.bound_max) + from_array(node.bound_min));
 
         float bound_distance;
-        if (returning) {
-            switch (node.variant) {
-                case SdCompositionVariant::Mirror:
-                    position = pos_mirrored.get(stack_index)
-                               ? center - 2.0f * dot(position - center, from_array(node.composition_par0)) *
-                                          from_array(node.composition_par0)
-                               : position;
-                    break;
-            }
-        } else {
+        if (!returning) {
             bound_distance = sd_simple_bounding_box(
                 position, from_array(node.bound_min), from_array(node.bound_max)
             );
@@ -227,6 +218,15 @@ __device__ float sd_composition(
                     case SdCompositionVariant::Mirror:
                     case SdCompositionVariant::Union:
                         sd = min(stack_node->sd, sd);
+                        break;
+                }
+
+                switch (node.variant) {
+                    case SdCompositionVariant::Mirror:
+                        position = pos_mirrored.get(stack_index)
+                                   ? center - 2.0f * dot(position - center, from_array(node.composition_par0)) *
+                                              from_array(node.composition_par0)
+                                   : position;
                         break;
                 }
 

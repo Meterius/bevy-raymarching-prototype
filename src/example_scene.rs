@@ -16,7 +16,7 @@ pub fn setup_scene(
     let mut ss_random = StdRng::seed_from_u64(0);
 
     let mut example_offset = 0.0;
-    let spawn_example = |variant: SdCompositionNodeVariant| {
+    let mut spawn_example = |variant: SdCompositionNodeVariant| {
         let child1 = commands
             .spawn((
                 SdPrimitive::Box(Vec3::new(5.0, 2.0, 1.0)),
@@ -41,7 +41,7 @@ pub fn setup_scene(
             ))
             .id();
 
-        commands
+        let id = commands
             .spawn((
                 match variant {
                     SdCompositionNodeVariant::Union => SdComposition::Union(vec![child1, child2]),
@@ -53,20 +53,24 @@ pub fn setup_scene(
                     }
                     _ => unimplemented!(),
                 },
-                SdVisual::default(),
                 SpatialBundle {
                     transform: Transform::from_xyz(0.0, 2.0, example_offset),
                     ..default()
                 },
             ))
-            .push_children(&[child1, child2]);
+            .push_children(&[child1, child2])
+            .id();
 
         *&mut example_offset += 4.0;
+
+        return id;
     };
 
-    // spawn_example(SdCompositionNodeVariant::Union);
-    // spawn_example(SdCompositionNodeVariant::Intersect);
-    // spawn_example(SdCompositionNodeVariant::Difference);
+    let mut mirrored = vec![
+        spawn_example(SdCompositionNodeVariant::Union),
+        spawn_example(SdCompositionNodeVariant::Intersect),
+        spawn_example(SdCompositionNodeVariant::Difference),
+    ];
 
     let box_id = commands
         .spawn((
@@ -79,13 +83,15 @@ pub fn setup_scene(
         ))
         .id();
 
+    mirrored.push(box_id);
+
     commands.spawn((
         bevy::core::Name::new("Mirror"),
         SpatialBundle {
-            transform: Transform::from_xyz(-40.0, 0.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
+            transform: Transform::from_xyz(-10.0, 0.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
             ..default()
         },
-        SdComposition::Mirror(vec![box_id]),
+        SdComposition::Mirror(mirrored),
         SdVisual::default(),
     ));
 
@@ -98,7 +104,7 @@ pub fn setup_scene(
     //     SdVisual::default(),
     // ));
 
-    if true {
+    if false {
         commands
             .spawn((
                 SpatialBundle::default(),
