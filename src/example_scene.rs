@@ -54,6 +54,7 @@ pub fn setup_scene(
                     }
                     _ => unimplemented!(),
                 },
+                SdVisual { enabled: true },
                 SpatialBundle {
                     transform: Transform::from_xyz(0.0, 2.0, example_offset),
                     ..default()
@@ -73,29 +74,17 @@ pub fn setup_scene(
         spawn_example(SdCompositionNodeVariant::Difference),
     ];
 
-    let box_id = commands
+    commands
         .spawn((
-            PbrBundle {
-                transform: Transform {
-                    translation: Vec3::new(5.0, -1.0, -2.0),
-                    scale: Vec3::new(4.0, 0.5, 2.0),
-                    ..default()
-                },
-                mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
-                material: materials.add(Color::rgb_u8(124, 144, 255).into()),
+            SpatialBundle {
+                transform: Transform::from_xyz(0.0, -0.5, 0.0),
                 ..default()
             },
             bevy::core::Name::new("Box"),
             SdVisual::default(),
-            SdPrimitive::Box(Vec3::new(1.0, 1.0, 1.0)),
-            RotateAxisMotion {
-                axis: Vec3::X.normalize(),
-                cycle_duration: 5.0,
-            },
+            SdPrimitive::Box(Vec3::new(30.0, 1.0, 30.0)),
         ))
         .id();
-
-    mirrored.push(box_id);
 
     commands.spawn((
         bevy::core::Name::new("Mirror"),
@@ -104,7 +93,7 @@ pub fn setup_scene(
             ..default()
         },
         SdComposition::Mirror(mirrored),
-        SdVisual::default(),
+        SdVisual { enabled: false },
         AxisCyclicMotion {
             direction: Vec3::X * 15.0,
             cycle_duration: 30.0,
@@ -118,7 +107,7 @@ pub fn setup_scene(
             ..default()
         },
         SdPrimitive::Mandelbulb(400.0),
-        SdVisual::default(),
+        SdVisual { enabled: true },
     ));
 
     if true {
@@ -163,7 +152,7 @@ pub fn setup_scene(
                                         ..default()
                                     },
                                     SdPrimitive::Sphere(0.25 + ss_random.gen::<f32>() * 1.75),
-                                    SdVisual { enabled: false },
+                                    SdVisual { enabled: true },
                                     SphericCyclicMotion {
                                         distances: 50.0
                                             * Vec3::new(
@@ -196,7 +185,7 @@ pub fn setup_scene(
                 ..default()
             },
             SdComposition::Mirror(sphere_clouds),
-            SdVisual::default(),
+            SdVisual { enabled: false },
         ));
     }
 
