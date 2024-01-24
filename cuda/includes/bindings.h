@@ -78,18 +78,21 @@ struct SunLight {
 };
 
 enum SdPrimitiveVariant {
-    None, Sphere, Cube, Mandelbulb
+    None, Empty, Sphere, Cube, Mandelbulb
 };
 
 enum SdCompositionVariant {
     Union,
     Difference,
-    Intersect
+    Intersect,
+    Mirror // par0 stores direction
 };
 
 struct SdComposition {
     float bound_max[3];
     float bound_min[3];
+
+    float composition_par0[3];
 
     unsigned int child;
     unsigned int parent: 24;

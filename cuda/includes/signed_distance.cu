@@ -106,7 +106,7 @@ struct RuntimeStackNode {
 };
 
 #define USE_SHARED_RUNTIME_STACK false
-#define SD_RUNTIME_STACK_MAX_DEPTH 48
+#define SD_RUNTIME_STACK_MAX_DEPTH 32
 #define SD_SHARED_RUNTIME_STACK_MAX_DEPTH 18
 
 #if USE_SHARED_RUNTIME_STACK == true
@@ -126,6 +126,7 @@ __device__ float sd_composition(
     bool returning = false;
 
     BitSet<32> second_child {};
+    BitSet<32> pos_mirrored {};
 
 #if USE_SHARED_RUNTIME_STACK == false
     RuntimeStackNode sd_runtime_stack[SD_RUNTIME_STACK_MAX_DEPTH];
@@ -140,6 +141,8 @@ __device__ float sd_composition(
 #endif
         ];
     };
+
+    vec3 position = p;
 
     *get_stack_node(stack_index) = { MAX_POSITIVE_F32 };
 
@@ -156,10 +159,20 @@ __device__ float sd_composition(
         SdComposition node = geometry.compositions[index];
         RuntimeStackNode *stack_node = get_stack_node(stack_index);
 
-        vec3 position = p;
+        vec3 scale = from_array(node.bound_max) - from_array(node.bound_min);
+        vec3 center = 0.5f * (from_array(node.bound_max) + from_array(node.bound_min));
 
         float bound_distance;
-        if (!returning) {
+        if (returning) {
+            switch (node.variant) {
+                case SdCompositionVariant::Mirror:
+                    position = pos_mirrored.get(stack_index)
+                               ? center - 2.0f * dot(position - center, from_array(node.composition_par0)) *
+                                          from_array(node.composition_par0)
+                               : position;
+                    break;
+            }
+        } else {
             bound_distance = sd_simple_bounding_box(
                 position, from_array(node.bound_min), from_array(node.bound_max)
             );
@@ -174,12 +187,10 @@ __device__ float sd_composition(
             }
         }
 
-        vec3 scale = from_array(node.bound_max) - from_array(node.bound_min);
-        vec3 center = 0.5f * (from_array(node.bound_max) + from_array(node.bound_min));
-
         if (node.primitive_variant != SdPrimitiveVariant::None) {
             switch (node.primitive_variant) {
-                case SdPrimitiveVariant::None:
+                case SdPrimitiveVariant::Empty:
+                    sd = MAX_POSITIVE_F32;
                     break;
 
                 case SdPrimitiveVariant::Sphere:
@@ -213,6 +224,7 @@ __device__ float sd_composition(
                         sd = max(stack_node->sd, sd);
                         break;
 
+                    case SdCompositionVariant::Mirror:
                     case SdCompositionVariant::Union:
                         sd = min(stack_node->sd, sd);
                         break;
@@ -228,6 +240,18 @@ __device__ float sd_composition(
                     stack_node->sd = sd;
                     second_child.set(stack_index, true);
                     index += 1;
+                } else {
+                    switch (node.variant) {
+                        case SdCompositionVariant::Mirror: {
+                            float diff = dot(p - center, from_array(node.composition_par0));
+
+                            pos_mirrored.set(stack_index, diff < 0.0f);
+                            position =
+                                diff < 0.0f ? position - 2.0f * diff * from_array(node.composition_par0) : position;
+
+                            break;
+                        }
+                    }
                 }
 
                 stack_index += 1;

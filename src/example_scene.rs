@@ -16,7 +16,7 @@ pub fn setup_scene(
     let mut ss_random = StdRng::seed_from_u64(0);
 
     let mut example_offset = 0.0;
-    let mut spawn_example = |variant: SdCompositionNodeVariant| {
+    let spawn_example = |variant: SdCompositionNodeVariant| {
         let child1 = commands
             .spawn((
                 SdPrimitive::Box(Vec3::new(5.0, 2.0, 1.0)),
@@ -64,81 +64,100 @@ pub fn setup_scene(
         *&mut example_offset += 4.0;
     };
 
-    spawn_example(SdCompositionNodeVariant::Union);
-    spawn_example(SdCompositionNodeVariant::Intersect);
-    spawn_example(SdCompositionNodeVariant::Difference);
+    // spawn_example(SdCompositionNodeVariant::Union);
+    // spawn_example(SdCompositionNodeVariant::Intersect);
+    // spawn_example(SdCompositionNodeVariant::Difference);
+
+    let box_id = commands
+        .spawn((
+            bevy::core::Name::new("Box"),
+            SpatialBundle {
+                transform: Transform::from_xyz(0.0, -0.5, 0.0),
+                ..default()
+            },
+            SdPrimitive::Box(Vec3::new(30.0, 1.0, 30.0)),
+        ))
+        .id();
 
     commands.spawn((
+        bevy::core::Name::new("Mirror"),
         SpatialBundle {
-            transform: Transform::from_xyz(0.0, -0.5, 0.0),
+            transform: Transform::from_xyz(-40.0, 0.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
             ..default()
         },
-        SdPrimitive::Box(Vec3::new(30.0, 1.0, 30.0)),
+        SdComposition::Mirror(vec![box_id]),
         SdVisual::default(),
     ));
 
-    commands.spawn((
-        SpatialBundle {
-            transform: Transform::from_xyz(-425.0, 0.0, 0.0),
-            ..default()
-        },
-        SdPrimitive::Mandelbulb(400.0),
-        SdVisual::default(),
-    ));
+    // commands.spawn((
+    //     SpatialBundle {
+    //         transform: Transform::from_xyz(-425.0, 0.0, 0.0),
+    //         ..default()
+    //     },
+    //     SdPrimitive::Mandelbulb(400.0),
+    //     SdVisual::default(),
+    // ));
 
     if true {
-        for _ in 0..64 {
-            let base = Vec3::new(
-                ss_random.gen::<f32>() * SAMPLE_SPHERE_CHUNK_DISTANCE
-                    - SAMPLE_SPHERE_CHUNK_DISTANCE * 0.5,
-                ss_random.gen::<f32>() * SAMPLE_SPHERE_CHUNK_DISTANCE
-                    - SAMPLE_SPHERE_CHUNK_DISTANCE * 0.5,
-                ss_random.gen::<f32>() * SAMPLE_SPHERE_CHUNK_DISTANCE
-                    - SAMPLE_SPHERE_CHUNK_DISTANCE * 0.5,
-            );
+        commands
+            .spawn((
+                SpatialBundle::default(),
+                bevy::core::Name::new("Sphere Clouds"),
+            ))
+            .with_children(|commands| {
+                for _ in 0..64 {
+                    let base = Vec3::new(
+                        ss_random.gen::<f32>() * SAMPLE_SPHERE_CHUNK_DISTANCE
+                            - SAMPLE_SPHERE_CHUNK_DISTANCE * 0.5,
+                        ss_random.gen::<f32>() * SAMPLE_SPHERE_CHUNK_DISTANCE
+                            - SAMPLE_SPHERE_CHUNK_DISTANCE * 0.5,
+                        ss_random.gen::<f32>() * SAMPLE_SPHERE_CHUNK_DISTANCE
+                            - SAMPLE_SPHERE_CHUNK_DISTANCE * 0.5,
+                    );
 
-            for _ in 0..64 {
-                commands.spawn((
-                    /*PbrBundle {
-                        mesh: meshes.add(Mesh::from(shape::Cube { size: 0.5 })),
-                        material: materials.add(Color::rgb_u8(124, 144, 255).into()),
-                        ..default()
-                    },*/
-                    SpatialBundle {
-                        transform: Transform::from_translation(
-                            base + Vec3::new(
-                                ss_random.gen::<f32>() * SAMPLE_SPHERE_DISTANCE
-                                    - SAMPLE_SPHERE_DISTANCE * 0.5,
-                                ss_random.gen::<f32>() * SAMPLE_SPHERE_DISTANCE
-                                    - SAMPLE_SPHERE_DISTANCE * 0.5,
-                                ss_random.gen::<f32>() * SAMPLE_SPHERE_DISTANCE
-                                    - SAMPLE_SPHERE_DISTANCE * 0.5,
-                            ),
-                        ),
-                        ..default()
-                    },
-                    SdPrimitive::Sphere(0.25 + ss_random.gen::<f32>() * 1.75),
-                    SdVisual::default(),
-                    SphericCyclicMotion {
-                        distances: 50.0
-                            * Vec3::new(
-                                ss_random.gen::<f32>(),
-                                ss_random.gen::<f32>(),
-                                ss_random.gen::<f32>(),
-                            ),
-                        cycle_durations: 10.0 * Vec3::ONE
-                            + 30.0
-                                * Vec3::new(
-                                    ss_random.gen::<f32>(),
-                                    ss_random.gen::<f32>(),
-                                    ss_random.gen::<f32>(),
+                    for _ in 0..64 {
+                        commands.spawn((
+                            /*PbrBundle {
+                                mesh: meshes.add(Mesh::from(shape::Cube { size: 0.5 })),
+                                material: materials.add(Color::rgb_u8(124, 144, 255).into()),
+                                ..default()
+                            },*/
+                            SpatialBundle {
+                                transform: Transform::from_translation(
+                                    base + Vec3::new(
+                                        ss_random.gen::<f32>() * SAMPLE_SPHERE_DISTANCE
+                                            - SAMPLE_SPHERE_DISTANCE * 0.5,
+                                        ss_random.gen::<f32>() * SAMPLE_SPHERE_DISTANCE
+                                            - SAMPLE_SPHERE_DISTANCE * 0.5,
+                                        ss_random.gen::<f32>() * SAMPLE_SPHERE_DISTANCE
+                                            - SAMPLE_SPHERE_DISTANCE * 0.5,
+                                    ),
                                 ),
-                        ..default()
-                    },
-                    TogglableVisual::default(),
-                ));
-            }
-        }
+                                ..default()
+                            },
+                            SdPrimitive::Sphere(0.25 + ss_random.gen::<f32>() * 1.75),
+                            SdVisual { enabled: false },
+                            SphericCyclicMotion {
+                                distances: 50.0
+                                    * Vec3::new(
+                                        ss_random.gen::<f32>(),
+                                        ss_random.gen::<f32>(),
+                                        ss_random.gen::<f32>(),
+                                    ),
+                                cycle_durations: 10.0 * Vec3::ONE
+                                    + 30.0
+                                        * Vec3::new(
+                                            ss_random.gen::<f32>(),
+                                            ss_random.gen::<f32>(),
+                                            ss_random.gen::<f32>(),
+                                        ),
+                                ..default()
+                            },
+                            TogglableVisual::default(),
+                        ));
+                    }
+                }
+            });
     }
 
     /*    // light
