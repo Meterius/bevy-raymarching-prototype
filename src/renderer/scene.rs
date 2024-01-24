@@ -675,13 +675,6 @@ fn compile_scene_geometry(
                     SdCompositionNodeVariant::Primitive(primitive) => primitive.scale.to_array(),
                     _ => [0.0; 3],
                 },
-                par2: match &item.variant {
-                    SdCompositionNodeVariant::Primitive(primitive) => {
-                        primitive.translation.to_array()
-                    }
-                    SdCompositionNodeVariant::Mirror(center, _) => center.to_array(),
-                    _ => [0.0; 3],
-                },
                 ..default()
             };
 

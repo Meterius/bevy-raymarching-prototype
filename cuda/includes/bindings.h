@@ -99,12 +99,13 @@ struct SdComposition {
 
     float par0[4];
     float par1[3];
-    float par2[3];
 
     unsigned int child;
     unsigned int parent: 24;
     enum SdCompositionVariant variant: 4;
     enum SdPrimitiveVariant primitive_variant: 4;
+
+    char padding[2];
 };
 
 struct SdRuntimeSceneLighting {

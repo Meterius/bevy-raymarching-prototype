@@ -164,7 +164,7 @@ __device__ float sd_composition(
         SdComposition node = geometry.compositions[index];
         RuntimeStackNode *stack_node = get_stack_node(stack_index);
 
-        vec3 center = from_array(node.par2);
+        vec3 center = 0.5f * (from_array(node.bound_min) + from_array(node.bound_max));
 
         float bound_distance;
         if (!returning) {
