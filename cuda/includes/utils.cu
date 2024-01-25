@@ -54,4 +54,9 @@ public:
     __device__ void set(uint32_t index, bool value) {
         bits = (bits & ~(1 << index)) | (value << index);
     }
+
+    __forceinline__
+    __device__ void set(uint32_t index, bool value, bool condition) {
+        bits = condition ? (bits & ~(1 << index)) | (value << index) : bits;
+    }
 };

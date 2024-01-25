@@ -169,7 +169,7 @@ pub fn setup_scene(
                                     SdPrimitive::Sphere(0.25 + ss_random.gen::<f32>() * 1.75),
                                     SdVisual { enabled: true },
                                     SphericCyclicMotion {
-                                        distances: 200.0
+                                        distances: 50.0
                                             * Vec3::new(
                                                 ss_random.gen::<f32>(),
                                                 ss_random.gen::<f32>(),

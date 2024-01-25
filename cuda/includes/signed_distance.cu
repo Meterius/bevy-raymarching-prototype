@@ -110,13 +110,7 @@ struct RuntimeStackNode {
     float sd;
 };
 
-#define USE_SHARED_RUNTIME_STACK false
 #define SD_RUNTIME_STACK_MAX_DEPTH 32
-#define SD_SHARED_RUNTIME_STACK_MAX_DEPTH 18
-
-#if USE_SHARED_RUNTIME_STACK == true
-__shared__ RuntimeStackNode sd_runtime_stack[BLOCK_SIZE * SD_SHARED_RUNTIME_STACK_MAX_DEPTH];
-#endif
 
 __device__ float sd_composition(
     vec3 p,
@@ -125,7 +119,7 @@ __device__ float sd_composition(
     int composition_index
 ) {
     int stack_index = 0;
-    int index = composition_index;
+    unsigned int index = composition_index;
 
     float sd = 0.0f;
     bool returning = false;
@@ -134,73 +128,45 @@ __device__ float sd_composition(
     BitSet<32> second_child {};
     BitSet<32> pos_mirrored {};
 
-#if USE_SHARED_RUNTIME_STACK == false
     RuntimeStackNode sd_runtime_stack[SD_RUNTIME_STACK_MAX_DEPTH];
-#endif
-
-    const auto get_stack_node = [&](int i) {
-        return &sd_runtime_stack[
-#if USE_SHARED_RUNTIME_STACK == true
-            threadIdx.x + i * BLOCK_SIZE
-#else
-            i
-#endif
-        ];
-    };
 
     vec3 position = p;
 
-    *get_stack_node(stack_index) = { MAX_POSITIVE_F32 };
-
-//    if (threadIdx.x != 0 || blockIdx.x != 0) {
-//        return 0.0;
-//    }
-//
-//    printf("\n");
+    sd_runtime_stack[stack_index] = { MAX_POSITIVE_F32 };
 
     while (stack_index >= 0) {
-//        printf("Index %d Stack %d SC ", index, stack_index);
-//        printf_bitwise(second_child.bits);
-//        printf(" saCO ");
-//        printf_bitwise(second_child_offset.bits);
-//        printf("\n");
-
 #if CUDA_DEBUG == true
         assert(stack_index >= 0);
-#if USE_SHARED_RUNTIME_STACK == true
-        assert(stack_index < SD_SHARED_RUNTIME_STACK_MAX_DEPTH);
-#else
         assert(stack_index < SD_RUNTIME_STACK_MAX_DEPTH);
-#endif
 #endif
 
         SdComposition node = geometry.compositions[index];
-        RuntimeStackNode *stack_node = get_stack_node(stack_index);
+        RuntimeStackNode *stack_node = &sd_runtime_stack[stack_index];
 
         vec3 center = 0.5f * (from_array(node.bound_min) + from_array(node.bound_max));
 
-        float bound_distance;
-        if (!returning) {
-            second_child_offset.set(
-                stack_index - 1,
-                node.primitive_variant != SdPrimitiveVariant::None || node.variant == SdCompositionVariant::Mirror
-            );
+        // set the parents child offset when invoking the node
+        second_child_offset.set(
+            stack_index - 1,
+            node.primitive_variant != SdPrimitiveVariant::None || node.variant == SdCompositionVariant::Mirror,
+            !returning
+        );
 
-            bound_distance = sd_simple_bounding_box(
-                position, from_array(node.bound_min), from_array(node.bound_max)
-            );
+        // determine bb distance when invoking the node
+        float bound_distance = !returning ? sd_simple_bounding_box(
+            position, from_array(node.bound_min), from_array(node.bound_max)
+        ) : 0.0f;
 
-            if (bound_distance > cd + 1.0f) {
-                sd = bound_distance;
+        if (bound_distance > cd + 1.0f) {
+            // early-bounding box return
+            sd = bound_distance;
 
-                index = node.parent;
-                stack_index -= 1;
-                returning = true;
-                continue;
-            }
-        }
+            index = node.parent;
+            stack_index -= 1;
+            returning = true;
+        } else if (node.primitive_variant != SdPrimitiveVariant::None) {
+            // primitive return
 
-        if (node.primitive_variant != SdPrimitiveVariant::None) {
             auto appendix = &reinterpret_cast<SdCompositionPrimitiveAppendix *>(geometry.compositions)[index + 1];
 
             quat rot = from_quat_array(appendix->rotation);
@@ -208,6 +174,8 @@ __device__ float sd_composition(
             vec3 primitive_position = rotate(inverse(rot), (position - center));
 
             switch (node.primitive_variant) {
+                default:
+                case SdPrimitiveVariant::None:
                 case SdPrimitiveVariant::Empty:
                     sd = MAX_POSITIVE_F32;
                     break;
@@ -229,7 +197,10 @@ __device__ float sd_composition(
             stack_index -= 1;
             returning = true;
         } else {
+            // node handling
+
             if (returning && second_child.get(stack_index)) {
+                // returning from second child
                 switch (node.variant) {
                     case SdCompositionVariant::Difference:
                         sd = max(stack_node->sd, -sd);
@@ -239,13 +210,21 @@ __device__ float sd_composition(
                         sd = max(stack_node->sd, sd);
                         break;
 
+                    default:
                     case SdCompositionVariant::Mirror:
                     case SdCompositionVariant::Union:
                         sd = min(stack_node->sd, sd);
                         break;
                 }
 
+                // when returning reverse position modification
                 switch (node.variant) {
+                    default:
+                    case SdCompositionVariant::Union:
+                    case SdCompositionVariant::Intersect:
+                    case SdCompositionVariant::Difference:
+                        break;
+
                     case SdCompositionVariant::Mirror: {
                         auto appendix = &reinterpret_cast<SdCompositionMirrorAppendix *>(
                             geometry.compositions
@@ -265,8 +244,17 @@ __device__ float sd_composition(
                 stack_index -= 1;
                 returning = true;
             } else {
+                index = node.child;
+
                 if (!returning) {
+                    // when invoking the node apply position modification
                     switch (node.variant) {
+                        default:
+                        case SdCompositionVariant::Union:
+                        case SdCompositionVariant::Intersect:
+                        case SdCompositionVariant::Difference:
+                            break;
+
                         case SdCompositionVariant::Mirror: {
                             auto appendix = &reinterpret_cast<SdCompositionMirrorAppendix *>(
                                 geometry.compositions
@@ -281,11 +269,9 @@ __device__ float sd_composition(
                             break;
                         }
                     }
-                }
-
-                index = node.child;
-
-                if (returning) {
+                } else {
+                    // when returning from the first child update the stack sd using the returned sd,
+                    // also offset the child index if the child has indicated it used two entries for its node storage
                     stack_node->sd = sd;
                     second_child.set(stack_index, true);
                     index += 1 + second_child_offset.get(stack_index);
@@ -294,9 +280,9 @@ __device__ float sd_composition(
                 stack_index += 1;
                 returning = false;
 
-                *get_stack_node(stack_index) = {
-                    MAX_POSITIVE_F32
-                };
+                // reset stack values when entering the next node, child offset needs not be written as it will
+                // be overwritten by the child's child regardless
+                sd_runtime_stack[stack_index] = { MAX_POSITIVE_F32 };
                 second_child.set(stack_index, false);
             }
         }

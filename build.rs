@@ -133,7 +133,7 @@ fn compile_cuda() {
         nvcc_status.arg(format!("-arch={}", "native")).arg("-cubin");
 
         if reg_compressed {
-            nvcc_status.arg("--maxrregcount=56");
+            nvcc_status.arg("--maxrregcount=48");
         }
 
         let nvcc_status = nvcc_status.status().unwrap();
