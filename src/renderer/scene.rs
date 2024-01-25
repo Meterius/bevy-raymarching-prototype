@@ -631,7 +631,7 @@ fn draw_bb_gizmos(gizmos: &mut Gizmos, node: &SdCompositionNode) {
     })
 }
 
-const PRINT_COMPILE_SCENE_GEOMETRY_INFO: bool = true;
+const PRINT_COMPILE_SCENE_GEOMETRY_INFO: bool = false;
 
 fn compile_scene_geometry(
     mut render_scene_stored: ResMut<RenderSceneStoredGeometry>,
