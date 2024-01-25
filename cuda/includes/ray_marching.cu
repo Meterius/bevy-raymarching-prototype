@@ -15,7 +15,7 @@ __device__ RayMarchHit ray_march(
     SdSceneFunc sd_scene,
     Ray ray,
     ConeMarchTextureValue starting = ConeMarchTextureValue {},
-    float cone_radius_at_unit = 0.0
+    float cone_radius_at_unit = 0.0f
 ) {
     RayMarchHit hit {
         (int) starting.steps,
@@ -71,12 +71,12 @@ __device__ float soft_shadow_ray_march(
         float sd = sd_scene(ray.position + ray.direction * depth, RAY_MARCH_COLLISION_DISTANCE);
 
         if (sd <= RAY_MARCH_COLLISION_DISTANCE) {
-            return 0.0;
+            return 0.0f;
         }
 
-        float y = sd * sd / (2.0 * ph);
+        float y = sd * sd / (2.0f * ph);
         float d = sqrt(sd * sd - y * y);
-        res = min(res, d / (w * max(0.0, depth - y)));
+        res = min(res, d / (w * max(0.0f, depth - y)));
         ph = sd;
         depth += sd;
 

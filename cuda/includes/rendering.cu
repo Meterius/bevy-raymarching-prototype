@@ -3,7 +3,7 @@
 #include "./libraries/glm/glm.hpp"
 #include "./bindings.h"
 #include "./types.cu"
-#include "./utils.h"
+#include "./utils.cu"
 #include "./ray_marching.cu"
 
 using namespace glm;

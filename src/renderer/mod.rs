@@ -34,7 +34,7 @@ impl Default for RenderConeCompression {
     fn default() -> Self {
         Self {
             enabled: true,
-            levels: [16, 4],
+            levels: [16, 8, 4, 2],
         }
     }
 }
