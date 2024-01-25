@@ -101,17 +101,28 @@ pub fn setup_scene(
         },
     ));
 
+    let mb_id = commands
+        .spawn((
+            SpatialBundle {
+                transform: Transform::from_xyz(-425.0, 0.0, 0.0),
+                ..default()
+            },
+            SdPrimitive::Mandelbulb(400.0),
+            RotateAxisMotion {
+                axis: Vec3::Y,
+                cycle_duration: 60.0,
+            },
+            SdVisual { enabled: true },
+        ))
+        .id();
+
     commands.spawn((
         SpatialBundle {
-            transform: Transform::from_xyz(-425.0, 0.0, 0.0),
+            transform: Transform::from_xyz(-425.0 / 2.0, 0.0, 0.0).looking_to(Vec3::Z, Vec3::Y),
             ..default()
         },
-        SdPrimitive::Mandelbulb(400.0),
-        SdVisual { enabled: true },
-        RotateAxisMotion {
-            axis: Vec3::Y,
-            cycle_duration: 60.0,
-        },
+        SdComposition::Mirror(vec![mb_id]),
+        SdVisual { enabled: false },
     ));
 
     if true {
@@ -158,7 +169,7 @@ pub fn setup_scene(
                                     SdPrimitive::Sphere(0.25 + ss_random.gen::<f32>() * 1.75),
                                     SdVisual { enabled: true },
                                     SphericCyclicMotion {
-                                        distances: 50.0
+                                        distances: 200.0
                                             * Vec3::new(
                                                 ss_random.gen::<f32>(),
                                                 ss_random.gen::<f32>(),
