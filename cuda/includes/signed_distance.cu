@@ -2,8 +2,9 @@
 
 #include "../includes/libraries/glm/glm.hpp"
 #include "../includes/types.cu"
-#include "../includes/utils.h"
+#include "../includes/utils.cu"
 #include "../includes/ray_marching.cu"
+#include "../includes/libraries/glm/gtx/quaternion.hpp"
 #include <assert.h>
 
 using namespace glm;
@@ -51,10 +52,14 @@ __device__ float sd_mandelbulb(vec3 p, float time) {
     return 0.5f * log(r) * r / dr;
 }
 
+__device__ float sd_unit_mandelbulb(vec3 p) {
+    return sd_mandelbulb(p / 0.4f, 0.0f) * 0.4f;
+}
+
 // primitives
 
 __device__ float sd_unit_sphere(vec3 p) {
-    return length(p) - 0.5;
+    return length(p) - 0.5f;
 }
 
 __device__ float sd_box(vec3 p, vec3 bp, vec3 bs) {
@@ -106,7 +111,7 @@ struct RuntimeStackNode {
 };
 
 #define USE_SHARED_RUNTIME_STACK false
-#define SD_RUNTIME_STACK_MAX_DEPTH 48
+#define SD_RUNTIME_STACK_MAX_DEPTH 32
 #define SD_SHARED_RUNTIME_STACK_MAX_DEPTH 18
 
 #if USE_SHARED_RUNTIME_STACK == true
@@ -124,15 +129,10 @@ __device__ float sd_composition(
 
     float sd = 0.0f;
     bool returning = false;
-    unsigned int second_child = 0;
 
-    const auto get_second_child = [&](unsigned int i) {
-        return (bool) ((second_child >> i) & 1);
-    };
-
-    const auto set_second_child = [&](unsigned int i, bool v) {
-        second_child = (second_child & ~(1 << i)) | ((unsigned int) v << i);
-    };
+    BitSet<32> second_child_offset {};
+    BitSet<32> second_child {};
+    BitSet<32> pos_mirrored {};
 
 #if USE_SHARED_RUNTIME_STACK == false
     RuntimeStackNode sd_runtime_stack[SD_RUNTIME_STACK_MAX_DEPTH];
@@ -148,25 +148,44 @@ __device__ float sd_composition(
         ];
     };
 
+    vec3 position = p;
+
     *get_stack_node(stack_index) = { MAX_POSITIVE_F32 };
 
+//    if (threadIdx.x != 0 || blockIdx.x != 0) {
+//        return 0.0;
+//    }
+//
+//    printf("\n");
+
     while (stack_index >= 0) {
+//        printf("Index %d Stack %d SC ", index, stack_index);
+//        printf_bitwise(second_child.bits);
+//        printf(" saCO ");
+//        printf_bitwise(second_child_offset.bits);
+//        printf("\n");
+
 #if CUDA_DEBUG == true
         assert(stack_index >= 0);
 #if USE_SHARED_RUNTIME_STACK == true
-            assert(stack_index < SD_SHARED_RUNTIME_STACK_MAX_DEPTH);
+        assert(stack_index < SD_SHARED_RUNTIME_STACK_MAX_DEPTH);
 #else
-            assert(stack_index < SD_RUNTIME_STACK_MAX_DEPTH);
+        assert(stack_index < SD_RUNTIME_STACK_MAX_DEPTH);
 #endif
 #endif
 
         SdComposition node = geometry.compositions[index];
         RuntimeStackNode *stack_node = get_stack_node(stack_index);
 
-        vec3 position = p;
+        vec3 center = 0.5f * (from_array(node.bound_min) + from_array(node.bound_max));
 
         float bound_distance;
         if (!returning) {
+            second_child_offset.set(
+                stack_index - 1,
+                node.primitive_variant != SdPrimitiveVariant::None || node.variant == SdCompositionVariant::Mirror
+            );
+
             bound_distance = sd_simple_bounding_box(
                 position, from_array(node.bound_min), from_array(node.bound_max)
             );
@@ -182,27 +201,27 @@ __device__ float sd_composition(
         }
 
         if (node.primitive_variant != SdPrimitiveVariant::None) {
-            vec3 scale = from_array(node.bound_max) - from_array(node.bound_min);
-            vec3 center = 0.5f * (from_array(node.bound_max) + from_array(node.bound_min));
+            auto appendix = &reinterpret_cast<SdCompositionPrimitiveAppendix *>(geometry.compositions)[index + 1];
+
+            quat rot = from_quat_array(appendix->rotation);
+            vec3 scale = from_array(appendix->scale);
+            vec3 primitive_position = rotate(inverse(rot), (position - center));
 
             switch (node.primitive_variant) {
-                case SdPrimitiveVariant::None:
+                case SdPrimitiveVariant::Empty:
+                    sd = MAX_POSITIVE_F32;
                     break;
 
                 case SdPrimitiveVariant::Sphere:
-                    sd = sd_unit_sphere(
-                        (position - center) / scale
-                    ) * minimum(scale);
+                    sd = sd_unit_sphere(primitive_position / scale) * minimum(scale);
                     break;
 
                 case SdPrimitiveVariant::Cube:
-                    sd = sd_box(
-                        position, center, scale
-                    );
+                    sd = sd_box(primitive_position, vec3(0.0f), scale);
                     break;
 
                 case SdPrimitiveVariant::Mandelbulb:
-                    sd = sd_mandelbulb((position - center) / (0.4f * scale), 0.0f) * 0.4f * minimum(scale);
+                    sd = sd_unit_mandelbulb(primitive_position / scale) * minimum(scale);
                     break;
             }
 
@@ -210,7 +229,7 @@ __device__ float sd_composition(
             stack_index -= 1;
             returning = true;
         } else {
-            if (returning && get_second_child(stack_index)) {
+            if (returning && second_child.get(stack_index)) {
                 switch (node.variant) {
                     case SdCompositionVariant::Difference:
                         sd = max(stack_node->sd, -sd);
@@ -220,21 +239,56 @@ __device__ float sd_composition(
                         sd = max(stack_node->sd, sd);
                         break;
 
+                    case SdCompositionVariant::Mirror:
                     case SdCompositionVariant::Union:
                         sd = min(stack_node->sd, sd);
                         break;
+                }
+
+                switch (node.variant) {
+                    case SdCompositionVariant::Mirror: {
+                        auto appendix = &reinterpret_cast<SdCompositionMirrorAppendix *>(
+                            geometry.compositions
+                        )[index + 1];
+
+                        vec3 dir = from_array(appendix->direction);
+
+                        position = pos_mirrored.get(stack_index)
+                                   ? position - 2.0f * dot(position - from_array(appendix->translation), dir) *
+                                                dir
+                                   : position;
+                        break;
+                    };
                 }
 
                 index = node.parent;
                 stack_index -= 1;
                 returning = true;
             } else {
+                if (!returning) {
+                    switch (node.variant) {
+                        case SdCompositionVariant::Mirror: {
+                            auto appendix = &reinterpret_cast<SdCompositionMirrorAppendix *>(
+                                geometry.compositions
+                            )[index + 1];
+
+                            vec3 dir = from_array(appendix->direction);
+                            float diff = dot(p - from_array(appendix->translation), dir);
+
+                            pos_mirrored.set(stack_index, diff < 0.0f);
+                            position =
+                                diff < 0.0f ? position - 2.0f * diff * dir : position;
+                            break;
+                        }
+                    }
+                }
+
                 index = node.child;
 
                 if (returning) {
                     stack_node->sd = sd;
-                    set_second_child(stack_index, true);
-                    index += 1;
+                    second_child.set(stack_index, true);
+                    index += 1 + second_child_offset.get(stack_index);
                 }
 
                 stack_index += 1;
@@ -243,7 +297,7 @@ __device__ float sd_composition(
                 *get_stack_node(stack_index) = {
                     MAX_POSITIVE_F32
                 };
-                set_second_child(stack_index, false);
+                second_child.set(stack_index, false);
             }
         }
     }

@@ -77,14 +77,20 @@ struct SunLight {
     float direction[3];
 };
 
+// par0 stores inverted euler rotation
 enum SdPrimitiveVariant {
-    None, Sphere, Cube, Mandelbulb
+    None,
+    Empty,
+    Sphere,
+    Cube,
+    Mandelbulb
 };
 
 enum SdCompositionVariant {
     Union,
     Difference,
-    Intersect
+    Intersect,
+    Mirror // par0 stores direction
 };
 
 struct SdComposition {
@@ -95,6 +101,18 @@ struct SdComposition {
     unsigned int parent: 24;
     enum SdCompositionVariant variant: 4;
     enum SdPrimitiveVariant primitive_variant: 4;
+};
+
+struct SdCompositionMirrorAppendix {
+    float translation[3];
+    float direction[3];
+    char padding[8];
+};
+
+struct SdCompositionPrimitiveAppendix {
+    float scale[3];
+    float rotation[4];
+    char padding[4];
 };
 
 struct SdRuntimeSceneLighting {
