@@ -176,6 +176,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyhow"
+version = "1.0.79"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "080e9890a082662b09c1ad45f567faeeb47f22b5fb23895fbe1e651e718e25ca"
+
+[[package]]
 name = "approx"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -405,6 +411,7 @@ dependencies = [
  "bevy",
  "bevy_editor_pls",
  "bevy_flycam",
+    "bevy_obj",
  "bindgen",
  "bytemuck",
  "cc",
@@ -892,6 +899,21 @@ dependencies = [
  "once_cell",
  "petgraph",
  "pretty-type-name",
+]
+
+[[package]]
+name = "bevy_obj"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "faa21e1c717fa6beda59767c449c587578714bdf3efcd8b74b468749a73e8368"
+dependencies = [
+    "anyhow",
+    "bevy_app",
+    "bevy_asset",
+    "bevy_render",
+    "bevy_utils",
+    "thiserror",
+    "tobj",
 ]
 
 [[package]]
@@ -3708,6 +3730,15 @@ name = "tinyvec_macros"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
+
+[[package]]
+name = "tobj"
+version = "4.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f7ca3ec0405b0f2f95e0dbcced28882190dc79b0dac63ff82533d256d770223"
+dependencies = [
+    "ahash",
+]
 
 [[package]]
 name = "toml_datetime"

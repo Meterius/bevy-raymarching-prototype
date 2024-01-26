@@ -174,6 +174,9 @@ fn compile_cuda() {
                 "SdComposition",
                 "SdCompositionMirrorAppendix",
                 "SdCompositionPrimitiveAppendix",
+                "MeshVertex",
+                "MeshTriangle",
+                "Mesh",
             ],
             &["Default"],
         )

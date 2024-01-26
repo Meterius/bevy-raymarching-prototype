@@ -187,6 +187,7 @@ __device__ float sd_composition(
                     sd = sd_unit_sphere(primitive_position / scale) * minimum(scale);
                     break;
 
+                case SdPrimitiveVariant::Mesh:
                 case SdPrimitiveVariant::Cube:
                     sd = sd_box(primitive_position, vec3(0.0f), scale);
                     break;

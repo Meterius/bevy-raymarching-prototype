@@ -77,12 +77,34 @@ struct SunLight {
     float direction[3];
 };
 
+struct MeshVertex {
+    float pos[3];
+    char padding[4];
+};
+
+struct MeshTriangle {
+    unsigned int vertex_ids[3];
+    char padding[4];
+};
+
+struct Mesh {
+    unsigned int triangle_start_id;
+    unsigned int triangle_end_id;
+};
+
+struct MeshBuffer {
+    struct MeshVertex *vertices;
+    struct MeshTriangle *triangles;
+    struct Mesh *meshes;
+};
+
 enum SdPrimitiveVariant {
     None,
     Empty,
     Sphere,
     Cube,
-    Mandelbulb
+    Mandelbulb,
+    Mesh
 };
 
 enum SdCompositionVariant {
@@ -111,7 +133,7 @@ struct SdCompositionMirrorAppendix {
 struct SdCompositionPrimitiveAppendix {
     float scale[3];
     float rotation[4];
-    char padding[4];
+    unsigned int mesh_id; // only valid if primitive is mesh
 };
 
 struct SdRuntimeSceneLighting {
@@ -121,6 +143,7 @@ struct SdRuntimeSceneLighting {
 
 struct SdRuntimeSceneGeometry {
     struct SdComposition *compositions;
+    struct MeshBuffer meshes;
 };
 
 struct SdRuntimeScene {

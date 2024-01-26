@@ -12,6 +12,7 @@ pub fn setup_scene(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut assets: Res<AssetServer>,
 ) {
     let mut ss_random = StdRng::seed_from_u64(0);
 
@@ -125,7 +126,19 @@ pub fn setup_scene(
         SdVisual { enabled: false },
     ));
 
-    if true {
+    commands.spawn((
+        PbrBundle {
+            transform: Transform::from_xyz(7.5, 5.0, 0.0),
+            mesh: assets.load("models/monkey.obj"),
+            material: materials.add(Color::rgb_u8(124, 144, 255).into()),
+            ..default()
+        },
+        SdPrimitive::Mesh(assets.load("models/monkey.obj")),
+        SdVisual { enabled: true },
+        TogglableVisual::default(),
+    ));
+
+    if false {
         let mut sphere_clouds = Vec::new();
 
         commands

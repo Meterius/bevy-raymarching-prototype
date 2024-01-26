@@ -1,8 +1,8 @@
 pub mod scene;
 
 use crate::bindings::cuda::{
-    ConeMarchTextureValue, RenderDataTextureValue, SdComposition, SdRuntimeSceneGeometry,
-    BLOCK_SIZE, CONE_MARCH_LEVELS, MAX_SUN_LIGHT_COUNT,
+    ConeMarchTextureValue, Mesh, MeshBuffer, MeshTriangle, MeshVertex, RenderDataTextureValue,
+    SdComposition, SdRuntimeSceneGeometry, BLOCK_SIZE, CONE_MARCH_LEVELS, MAX_SUN_LIGHT_COUNT,
 };
 use crate::cudarc_extension::CustomCudaFunction;
 use crate::renderer::scene::RenderSceneSettings;
@@ -16,6 +16,10 @@ use std::ffi::CString;
 use std::sync::Arc;
 
 const MAX_COMPOSITION_NODE_COUNT: usize = 160000;
+
+const MAX_VERTEX_COUNT: usize = 1024;
+const MAX_TRIANGLE_COUNT: usize = 1024;
+const MAX_MESH_COUNT: usize = 1024;
 
 const RENDER_TEXTURE_SIZE: (usize, usize) = (2560, 1440);
 
@@ -54,6 +58,9 @@ struct RenderTargetImage(Handle<Image>);
 #[derive(Clone, Debug)]
 struct RenderSceneGeometry {
     compositions: Box<[SdComposition; MAX_COMPOSITION_NODE_COUNT]>,
+    triangles: Box<[MeshTriangle; MAX_TRIANGLE_COUNT]>,
+    vertices: Box<[MeshVertex; MAX_VERTEX_COUNT]>,
+    meshes: Box<[Mesh; MAX_MESH_COUNT]>,
 }
 
 impl Default for RenderSceneGeometry {
@@ -63,6 +70,16 @@ impl Default for RenderSceneGeometry {
                 vec![SdComposition::default(); MAX_COMPOSITION_NODE_COUNT].into_boxed_slice(),
             )
             .unwrap(),
+            triangles: Box::try_from(
+                vec![MeshTriangle::default(); MAX_TRIANGLE_COUNT].into_boxed_slice(),
+            )
+            .unwrap(),
+            vertices: Box::try_from(
+                vec![MeshVertex::default(); MAX_VERTEX_COUNT].into_boxed_slice(),
+            )
+            .unwrap(),
+            meshes: Box::try_from(vec![Mesh::default(); MAX_MESH_COUNT].into_boxed_slice())
+                .unwrap(),
         }
     }
 }
@@ -87,6 +104,10 @@ struct RenderCudaBuffers {
 
     cm_texture_buffers: Vec<CudaSlice<ConeMarchTextureValue>>,
     compositions_buffer: CudaSlice<SdComposition>,
+
+    mesh_vertex_buffer: CudaSlice<MeshVertex>,
+    mesh_triangle_buffer: CudaSlice<MeshTriangle>,
+    mesh_buffer: CudaSlice<Mesh>,
 }
 
 // App Systems
@@ -235,6 +256,10 @@ fn setup_cuda(world: &mut World) {
             .unwrap()
     };
 
+    let vertex_buffer = unsafe { device.alloc::<MeshVertex>(MAX_VERTEX_COUNT).unwrap() };
+    let triangle_buffer = unsafe { device.alloc::<MeshTriangle>(MAX_TRIANGLE_COUNT).unwrap() };
+    let mesh_buffer = unsafe { device.alloc::<Mesh>(MAX_MESH_COUNT).unwrap() };
+
     let compositions_buffer = unsafe {
         device
             .alloc::<SdComposition>(MAX_COMPOSITION_NODE_COUNT)
@@ -275,6 +300,9 @@ fn setup_cuda(world: &mut World) {
         render_data_texture_buffer,
         cm_texture_buffers,
         compositions_buffer,
+        mesh_vertex_buffer: vertex_buffer,
+        mesh_triangle_buffer: triangle_buffer,
+        mesh_buffer,
     });
     world.insert_non_send_resource(PreviousRenderParameter::default());
     world.insert_non_send_resource(RenderSceneGeometry::default());
@@ -359,6 +387,33 @@ fn render(
     };
 
     unsafe {
+        cudarc::driver::result::memcpy_htod_async(
+            render_buffers.mesh_buffer.device_ptr().clone(),
+            &geometry.meshes.as_slice(),
+            render_streams.render_stream.stream,
+        )
+        .unwrap()
+    };
+
+    unsafe {
+        cudarc::driver::result::memcpy_htod_async(
+            render_buffers.mesh_vertex_buffer.device_ptr().clone(),
+            &geometry.vertices.as_slice(),
+            render_streams.render_stream.stream,
+        )
+        .unwrap()
+    };
+
+    unsafe {
+        cudarc::driver::result::memcpy_htod_async(
+            render_buffers.mesh_triangle_buffer.device_ptr().clone(),
+            &geometry.triangles.as_slice(),
+            render_streams.render_stream.stream,
+        )
+        .unwrap()
+    };
+
+    unsafe {
         cudarc::driver::result::event::record(
             render_context.geometry_transferred_event.clone(),
             render_streams.render_stream.stream.clone(),
@@ -403,6 +458,15 @@ fn render(
         geometry: SdRuntimeSceneGeometry {
             compositions: unsafe {
                 std::mem::transmute(*(&render_buffers.compositions_buffer).device_ptr())
+            },
+            meshes: MeshBuffer {
+                meshes: unsafe { std::mem::transmute(*(&render_buffers.mesh_buffer).device_ptr()) },
+                triangles: unsafe {
+                    std::mem::transmute(*(&render_buffers.mesh_triangle_buffer).device_ptr())
+                },
+                vertices: unsafe {
+                    std::mem::transmute(*(&render_buffers.mesh_vertex_buffer).device_ptr())
+                },
             },
         },
         lighting: crate::bindings::cuda::SdRuntimeSceneLighting {

@@ -1,7 +1,7 @@
 use crate::bindings::cuda;
 use crate::renderer::{RenderCudaContext, RenderSceneGeometry};
 use bevy::prelude::*;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 #[derive(Debug, Clone, Component, Reflect)]
 #[reflect(Component)]
@@ -9,6 +9,7 @@ pub enum SdPrimitive {
     Sphere(f32),
     Box(Vec3),
     Mandelbulb(f32),
+    Mesh(Handle<Mesh>),
 }
 
 impl Default for SdPrimitive {
@@ -87,6 +88,7 @@ pub enum SdPrimitiveNodeVariant {
     Sphere,
     Cube,
     Mandelbulb,
+    Mesh,
 }
 
 #[derive(Default, Clone, Debug)]
@@ -95,6 +97,7 @@ pub struct SdPrimitiveNode {
     translation: Vec3,
     scale: Vec3,
     rotation: Quat,
+    mesh_id: Option<u32>,
 }
 
 impl SdPrimitiveNode {
@@ -217,6 +220,7 @@ impl SdCompositionNode {
                     scale: Vec3::ONE,
                     rotation: Quat::IDENTITY,
                     variant: SdPrimitiveNodeVariant::Empty,
+                    mesh_id: None,
                 }),
                 children: Vec::new(),
                 bounding_box: (Vec3::NEG_INFINITY, Vec3::INFINITY),
@@ -432,6 +436,8 @@ fn collect_scene_geometry(
         ),
         Or<(With<SdPrimitive>, With<SdComposition>)>,
     >,
+    mesh_collection: &mut HashMap<Handle<Mesh>, u32>,
+    meshes: &mut Res<Assets<Mesh>>,
 ) -> SdCompositionNode {
     let mut roots = Vec::new();
 
@@ -447,6 +453,8 @@ fn collect_scene_geometry(
             ),
             Or<(With<SdPrimitive>, With<SdComposition>)>,
         >,
+        mut mesh_collection: &mut HashMap<Handle<Mesh>, u32>,
+        mut meshes: &mut Res<Assets<Mesh>>,
     ) -> Option<SdCompositionNode> {
         let (_id, trn, primitive, composition, _visual) = nodes.get(id).ok()?;
 
@@ -457,7 +465,9 @@ fn collect_scene_geometry(
                         variant: SdCompositionNodeVariant::Intersect,
                         children: children
                             .iter()
-                            .filter_map(|child| convert(child.clone(), nodes))
+                            .filter_map(|child| {
+                                convert(child.clone(), nodes, mesh_collection, meshes)
+                            })
                             .collect(),
                         ..default()
                     });
@@ -467,7 +477,9 @@ fn collect_scene_geometry(
                         variant: SdCompositionNodeVariant::Union,
                         children: children
                             .iter()
-                            .filter_map(|child| convert(child.clone(), nodes))
+                            .filter_map(|child| {
+                                convert(child.clone(), nodes, mesh_collection, meshes)
+                            })
                             .collect(),
                         ..default()
                     });
@@ -476,24 +488,33 @@ fn collect_scene_geometry(
                     return if children.len() == 0 {
                         None
                     } else if children.len() == 1 {
-                        convert(children[0].clone(), nodes)
+                        convert(children[0].clone(), nodes, mesh_collection, meshes)
                     } else {
-                        convert(children[0].clone(), nodes).map(move |node| SdCompositionNode {
-                            variant: SdCompositionNodeVariant::Difference,
-                            children: vec![
-                                node,
-                                SdCompositionNode {
-                                    variant: SdCompositionNodeVariant::Union,
-                                    children: children
-                                        .iter()
-                                        .skip(1)
-                                        .filter_map(|child| convert(child.clone(), nodes))
-                                        .collect(),
-                                    ..default()
-                                },
-                            ],
-                            ..default()
-                        })
+                        convert(children[0].clone(), nodes, mesh_collection, meshes).map(
+                            move |node| SdCompositionNode {
+                                variant: SdCompositionNodeVariant::Difference,
+                                children: vec![
+                                    node,
+                                    SdCompositionNode {
+                                        variant: SdCompositionNodeVariant::Union,
+                                        children: children
+                                            .iter()
+                                            .skip(1)
+                                            .filter_map(|child| {
+                                                convert(
+                                                    child.clone(),
+                                                    nodes,
+                                                    mesh_collection,
+                                                    meshes,
+                                                )
+                                            })
+                                            .collect(),
+                                        ..default()
+                                    },
+                                ],
+                                ..default()
+                            },
+                        )
                     }
                 }
                 SdComposition::Mirror(children) => {
@@ -501,7 +522,9 @@ fn collect_scene_geometry(
                         variant: SdCompositionNodeVariant::Mirror(trn.translation(), trn.forward()),
                         children: children
                             .iter()
-                            .filter_map(|child| convert(child.clone(), nodes))
+                            .filter_map(|child| {
+                                convert(child.clone(), nodes, mesh_collection, meshes)
+                            })
                             .collect(),
                         ..default()
                     });
@@ -510,26 +533,65 @@ fn collect_scene_geometry(
         } else if let Some(primitive) = primitive {
             let trn_c = trn.compute_transform();
 
-            let primitive_node = SdPrimitiveNode {
-                variant: match primitive {
-                    SdPrimitive::Sphere(_) => SdPrimitiveNodeVariant::Sphere,
-                    SdPrimitive::Box(_) => SdPrimitiveNodeVariant::Cube,
-                    SdPrimitive::Mandelbulb(_) => SdPrimitiveNodeVariant::Mandelbulb,
-                },
-                translation: trn_c.translation,
-                scale: match primitive {
-                    SdPrimitive::Sphere(radius) => Vec3::ONE * *radius,
-                    SdPrimitive::Box(size) => size.clone(),
-                    SdPrimitive::Mandelbulb(radius) => Vec3::ONE * *radius,
-                } * trn_c.scale,
-                rotation: trn_c.rotation,
+            let primitive_node = match primitive {
+                SdPrimitive::Mesh(mesh_handle) => {
+                    let next_mesh_id = mesh_collection.len() as u32;
+                    let mesh_id = match mesh_collection.entry(mesh_handle.clone()) {
+                        std::collections::hash_map::Entry::Vacant(entry) => {
+                            entry.insert(next_mesh_id);
+                            next_mesh_id
+                        }
+                        std::collections::hash_map::Entry::Occupied(entry) => entry.get().clone(),
+                    };
+
+                    let mesh = meshes.get(mesh_handle);
+
+                    if let Some(mesh) = mesh {
+                        let bb = mesh.compute_aabb();
+
+                        if let Some(bb) = bb {
+                            Some(SdPrimitiveNode {
+                                variant: SdPrimitiveNodeVariant::Mesh,
+                                translation: trn_c.translation + Vec3::from(bb.center),
+                                scale: trn_c.scale * bb.half_extents.max_element() * 2.0,
+                                rotation: trn_c.rotation,
+                                mesh_id: Some(mesh_id),
+                            })
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                }
+                _ => Some(SdPrimitiveNode {
+                    variant: match primitive {
+                        SdPrimitive::Sphere(_) => SdPrimitiveNodeVariant::Sphere,
+                        SdPrimitive::Box(_) => SdPrimitiveNodeVariant::Cube,
+                        SdPrimitive::Mandelbulb(_) => SdPrimitiveNodeVariant::Mandelbulb,
+                        SdPrimitive::Mesh(_) => SdPrimitiveNodeVariant::Mesh,
+                    },
+                    translation: trn_c.translation,
+                    scale: match primitive {
+                        SdPrimitive::Sphere(radius) => Vec3::ONE * *radius,
+                        SdPrimitive::Box(size) => size.clone(),
+                        SdPrimitive::Mandelbulb(radius) => Vec3::ONE * *radius,
+                        SdPrimitive::Mesh(_) => Vec3::ONE,
+                    } * trn_c.scale,
+                    rotation: trn_c.rotation,
+                    mesh_id: None,
+                }),
             };
 
-            return Some(SdCompositionNode {
-                bounding_box: primitive_node.bounding_box(),
-                variant: SdCompositionNodeVariant::Primitive(primitive_node),
-                children: Vec::new(),
-            });
+            if let Some(primitive_node) = primitive_node {
+                return Some(SdCompositionNode {
+                    bounding_box: primitive_node.bounding_box(),
+                    variant: SdCompositionNodeVariant::Primitive(primitive_node),
+                    children: Vec::new(),
+                });
+            } else {
+                return None;
+            }
         }
 
         return None;
@@ -537,7 +599,7 @@ fn collect_scene_geometry(
 
     for (id, _trn, _primitive, _composition, visual) in nodes.iter() {
         if let Some(SdVisual { enabled: true }) = visual {
-            if let Some(item) = convert(id, nodes) {
+            if let Some(item) = convert(id, nodes, mesh_collection, meshes) {
                 roots.push(item);
             }
         }
@@ -586,6 +648,7 @@ fn convert_node_to_native(
             SdPrimitiveNodeVariant::Cube => cuda::SdPrimitiveVariant_Cube,
             SdPrimitiveNodeVariant::Sphere => cuda::SdPrimitiveVariant_Sphere,
             SdPrimitiveNodeVariant::Mandelbulb => cuda::SdPrimitiveVariant_Mandelbulb,
+            SdPrimitiveNodeVariant::Mesh => cuda::SdPrimitiveVariant_Mesh,
         },
         _ => cuda::SdPrimitiveVariant_None,
     });
@@ -607,6 +670,7 @@ fn convert_node_to_native(
                     primitive.rotation.y,
                     primitive.rotation.z,
                 ],
+                mesh_id: primitive.mesh_id.unwrap_or_default(),
                 ..default()
             })
         }
@@ -661,6 +725,7 @@ fn compile_scene_geometry(
             Or<(With<SdPrimitive>, With<SdComposition>)>,
         ),
     >,
+    mut meshes: Res<Assets<Mesh>>,
 ) {
     if !changed_nodes.is_empty() {
         let range_id = nvtx::range_start!("Compile Geometry");
@@ -668,9 +733,10 @@ fn compile_scene_geometry(
         let start = std::time::Instant::now();
 
         let mut composition_index: usize = 0;
+        let mut mesh_collection = HashMap::<Handle<Mesh>, u32>::default();
 
         let sub_range_id = nvtx::range_start!("Compile Geometry - Collect");
-        let mut root = collect_scene_geometry(&mut nodes);
+        let mut root = collect_scene_geometry(&mut nodes, &mut mesh_collection, &mut meshes);
 
         nvtx::range_end!(sub_range_id);
 

@@ -6,6 +6,7 @@ use bevy::render::RenderPlugin;
 use bevy::window::{CursorGrabMode, PresentMode, PrimaryWindow, WindowResolution};
 use bevy_editor_pls::EditorPlugin;
 use bevy_flycam::NoCameraPlayerPlugin;
+use bevy_obj::ObjPlugin;
 
 pub mod bindings;
 pub mod cudarc_extension;
@@ -35,6 +36,7 @@ fn main() {
                     ..default()
                 }),
             }),
+        ObjPlugin,
         FrameTimeDiagnosticsPlugin::default(),
         EntityCountDiagnosticsPlugin::default(),
         EditorPlugin::default(),
