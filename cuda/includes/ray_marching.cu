@@ -12,10 +12,10 @@ using namespace glm;
 
 template<bool useConeMarch, typename SdSceneFunc>
 __device__ RayMarchHit ray_march(
-    SdSceneFunc sd_scene,
-    Ray ray,
-    ConeMarchTextureValue starting = ConeMarchTextureValue {},
-    float cone_radius_at_unit = 0.0f
+    const SdSceneFunc sd_scene,
+    const Ray ray,
+    const ConeMarchTextureValue starting = ConeMarchTextureValue {},
+    const float cone_radius_at_unit = 0.0f
 ) {
     RayMarchHit hit {
         (int) starting.steps,
@@ -59,9 +59,9 @@ __device__ RayMarchHit ray_march(
 
 template<typename SdSceneFunc>
 __device__ float soft_shadow_ray_march(
-    SdSceneFunc sd_scene,
-    Ray ray,
-    float w
+    const SdSceneFunc sd_scene,
+    const Ray ray,
+    const float w
 ) {
     float res = 1.0f;
     float ph = 1e20f;

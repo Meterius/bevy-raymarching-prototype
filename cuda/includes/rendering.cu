@@ -11,8 +11,8 @@ using namespace glm;
 template<typename SdsFunc>
 __device__ RayRender
 render_ray(
-    Ray ray, float cone_radius_at_unit, SdsFunc sds_func, SdRuntimeSceneLighting lighting,
-    ConeMarchTextureValue starting
+    const Ray ray, const float cone_radius_at_unit, const SdsFunc sds_func, const SdRuntimeSceneLighting lighting,
+    const ConeMarchTextureValue starting
 ) {
     RenderSurfaceData surface {
         { 0.0f, 0.0f, 0.0f }

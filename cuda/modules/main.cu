@@ -13,16 +13,16 @@ using namespace glm;
 
 // coordinate system conversion
 
-__device__ vec2 texture_to_ndc(vec2 p, vec2 texture_size) {
+__device__ vec2 texture_to_ndc(const vec2 p, const vec2 texture_size) {
     return (p + vec2(0.5f, 0.5f)) / texture_size;
 }
 
-__device__ uvec2 ndc_to_texture(vec2 p, vec2 texture_size) {
+__device__ uvec2 ndc_to_texture(const vec2 p, const vec2 texture_size) {
     return uvec2(round((p * texture_size) - vec2(0.5f, 0.5f)));
 }
 
 template<typename Func, typename Texture>
-__device__ auto fetch_2d(ivec2 p, Texture &texture, Func map) {
+__device__ auto fetch_2d(const ivec2 p, const Texture &texture, Func map) {
     return map(
         texture.texture
         [min(max(p.x, 0), texture.size[0] - 1) +
@@ -31,13 +31,13 @@ __device__ auto fetch_2d(ivec2 p, Texture &texture, Func map) {
 }
 
 template<typename Texture>
-__device__ auto index_2d(ivec2 p, Texture &texture) {
+__device__ auto index_2d(const ivec2 p, const Texture &texture) {
     return min(max(p.x, 0), texture.size[0] - 1) + min(max(p.y, 0), texture.size[1] - 1) * texture.size[0];
 }
 
 
 __device__ float
-cubic_interpolate(float y0, float y1, float y2, float y3, float rx1) {
+cubic_interpolate(const float y0, const float y1, const float y2, const float y3, const float rx1) {
     return y1 + 0.5f * rx1 *
                 (y2 - y0 +
                  rx1 * (2.0f * y0 - 5.0f * y1 + 4.0f * y2 - y3 +
@@ -45,7 +45,7 @@ cubic_interpolate(float y0, float y1, float y2, float y3, float rx1) {
 }
 
 template<typename Func, typename Texture>
-__device__ auto ndc_to_interpolated_value(vec2 p, Texture &texture, Func map) {
+__device__ auto ndc_to_interpolated_value(const vec2 p, const Texture &texture, const Func map) {
     vec2 t = (p * vec2((float) texture.size[0], (float) texture.size[1])) -
              vec2(0.5f, 0.5f);
     ivec2 tc = ivec2(floor(t));
@@ -66,7 +66,7 @@ __device__ auto ndc_to_interpolated_value(vec2 p, Texture &texture, Func map) {
     );
 }
 
-__device__ vec2 ndc_to_camera(vec2 p, vec2 render_screen_size) {
+__device__ vec2 ndc_to_camera(const vec2 p, const vec2 render_screen_size) {
     return {
         (2 * p.x - 1) * (render_screen_size.x / render_screen_size.y),
         1 - 2 * p.y
@@ -74,7 +74,7 @@ __device__ vec2 ndc_to_camera(vec2 p, vec2 render_screen_size) {
 }
 
 __device__ vec3 camera_to_ray(
-    vec2 p, CameraBuffer CAMERA, vec2 screen_size, vec2 texture_size
+    const vec2 p, const CameraBuffer CAMERA, const vec2 screen_size, const vec2 texture_size
 ) {
     float width_factor =
         (screen_size.x / texture_size.x) * (texture_size.y / screen_size.y);
@@ -92,7 +92,7 @@ __device__ vec3 camera_to_ray(
 
 __device__ SdRuntimeScene runtime_scene;
 
-__device__ auto make_sds_scene(GlobalsBuffer &globals, CameraBuffer &camera) {
+__device__ auto make_sds_scene(const GlobalsBuffer &globals, const CameraBuffer &camera) {
     auto box_sds = make_generic_sds(
         [](vec3 p, float cd) {
             return sd_box(p, vec3(-15.0f, 1.0f, 0.0f), vec3(1.0f, 2.0f, 10.0f));
@@ -147,10 +147,10 @@ __device__ auto make_sds_scene(GlobalsBuffer &globals, CameraBuffer &camera) {
 
 template<typename Texture>
 __device__ float get_pixel_cone_radius(
-    uvec2 texture_coord,
-    CameraBuffer &camera,
-    Texture &texture,
-    GlobalsBuffer &globals
+    const uvec2 texture_coord,
+    const CameraBuffer &camera,
+    const Texture &texture,
+    const GlobalsBuffer &globals
 ) {
     const auto texture_to_dir = [&camera, &texture, &globals](
         vec2 p
@@ -239,12 +239,12 @@ __device__ float get_pixel_cone_radius(
 
 #ifndef DISABLE_CONE_MARCH
 extern "C" __global__ void compute_compressed_depth(
-    unsigned int level,
-    RenderDataTexture render_data_texture,
-    ConeMarchTextures cm_textures,
-    GlobalsBuffer globals,
-    CameraBuffer camera,
-    SdRuntimeScene runtime_scene_param
+    const unsigned int level,
+    const RenderDataTexture render_data_texture,
+    const ConeMarchTextures cm_textures,
+    const GlobalsBuffer globals,
+    const CameraBuffer camera,
+    const SdRuntimeScene runtime_scene_param
 ) {
     if (!threadIdx.x) {
         runtime_scene = runtime_scene_param;
@@ -365,7 +365,7 @@ extern "C" __global__ void compute_compressed_depth(
 }
 #endif
 
-__device__ ivec2 render_texture_coord(ivec2 render_texture_size) {
+__device__ ivec2 render_texture_coord(const ivec2 render_texture_size) {
     const int WARP_H = 8;
     const int WARP_W = 4;
 
@@ -397,12 +397,12 @@ __device__ ivec2 render_texture_coord(ivec2 render_texture_size) {
 }
 
 extern "C" __global__ void compute_render(
-    RenderDataTexture render_data_texture,
-    ConeMarchTextures cm_textures,
-    GlobalsBuffer globals,
-    CameraBuffer camera,
-    SdRuntimeScene runtime_scene_param,
-    bool compression_enabled
+    const RenderDataTexture render_data_texture,
+    const ConeMarchTextures cm_textures,
+    const GlobalsBuffer globals,
+    const CameraBuffer camera,
+    const SdRuntimeScene runtime_scene_param,
+    const bool compression_enabled
 ) {
     if (!threadIdx.x) {
         runtime_scene = runtime_scene_param;
@@ -498,7 +498,7 @@ extern "C" __global__ void compute_render(
 #define STEP_GAUSSIAN_SIZE 24
 #define STEP_GAUSSIAN_DEV 12.0f
 
-__device__ float step_gaussian_value(int i, int j) {
+__device__ float step_gaussian_value(const int i, const int j) {
     return exp(
         -((float) (i * i + j * j) /
           (2.0f * STEP_GAUSSIAN_DEV * STEP_GAUSSIAN_DEV))
@@ -507,10 +507,10 @@ __device__ float step_gaussian_value(int i, int j) {
 }
 
 extern "C" __global__ void compute_render_finalize(
-    Texture render_texture,
-    RenderDataTexture render_data_texture,
-    GlobalsBuffer globals,
-    bool compression_enabled
+    const Texture render_texture,
+    const RenderDataTexture render_data_texture,
+    const GlobalsBuffer globals,
+    const bool compression_enabled
 ) {
     u32 id = blockIdx.x * blockDim.x + threadIdx.x;
     uvec2 texture_coord = render_texture_coord({ render_data_texture.size[0], render_data_texture.size[1] });

@@ -46,17 +46,17 @@ class BitSet<32> {
 
 public:
     __forceinline__
-    __device__ bool get(uint32_t index) {
+    __device__ bool get(const uint32_t index) {
         return (bits >> index) & 1;
     }
 
     __forceinline__
-    __device__ void set(uint32_t index, bool value) {
+    __device__ void set(const uint32_t index, const bool value) {
         bits = (bits & ~(1 << index)) | (value << index);
     }
 
     __forceinline__
-    __device__ void set(uint32_t index, bool value, bool condition) {
+    __device__ void set(const uint32_t index, const bool value, const bool condition) {
         bits = condition ? (bits & ~(1 << index)) | (value << index) : bits;
     }
 };

@@ -4,7 +4,7 @@
 
 using namespace glm;
 
-__device__ vec3 hdr_map_aces_tone(vec3 hdr) {
+__device__ vec3 hdr_map_aces_tone(const vec3 hdr) {
     auto m1 = mat3x3(
         0.59719f, 0.07600f, 0.02840f,
         0.35458f, 0.90834f, 0.13383f,

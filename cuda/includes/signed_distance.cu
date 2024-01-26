@@ -11,11 +11,11 @@ using namespace glm;
 
 #define SURFACE_DISTANCE 0.001f
 
-__device__ float wrap(float x, float lower, float higher) {
+__device__ float wrap(const float x, const float lower, const float higher) {
     return lower + glm::mod(x - lower, higher - lower);
 }
 
-__device__ vec3 wrap(vec3 p, vec3 lower, vec3 higher) {
+__device__ vec3 wrap(const vec3 p, const vec3 lower, const vec3 higher) {
     return {
         wrap(p.x, lower.x, higher.x), wrap(p.y, lower.y, higher.y),
         wrap(p.z, lower.z, higher.z)
@@ -26,7 +26,7 @@ __device__ vec3 wrap(vec3 p, vec3 lower, vec3 higher) {
 
 #define POWER 7.0f
 
-__device__ float sd_mandelbulb(vec3 p, float time) {
+__device__ float sd_mandelbulb(const vec3 p, const float time) {
     vec3 z = p;
     float dr = 1.0f;
     float r;
@@ -52,29 +52,29 @@ __device__ float sd_mandelbulb(vec3 p, float time) {
     return 0.5f * log(r) * r / dr;
 }
 
-__device__ float sd_unit_mandelbulb(vec3 p) {
+__device__ float sd_unit_mandelbulb(const vec3 p) {
     return sd_mandelbulb(p / 0.4f, 0.0f) * 0.4f;
 }
 
 // primitives
 
-__device__ float sd_unit_sphere(vec3 p) {
+__device__ float sd_unit_sphere(const vec3 p) {
     return length(p) - 0.5f;
 }
 
-__device__ float sd_box(vec3 p, vec3 bp, vec3 bs) {
+__device__ float sd_box(const vec3 p, const vec3 bp, const vec3 bs) {
     vec3 q = abs(p - bp) - bs / 2.0f;
     float udst = length(max(q, vec3(0.0f)));
     float idst = maximum(min(q, vec3(0.0f)));
     return udst + idst;
 }
 
-__device__ float sd_simple_box(vec3 p, vec3 bp, vec3 bs) {
+__device__ float sd_simple_box(const vec3 p, const vec3 bp, const vec3 bs) {
     vec3 q = abs(p - bp) - bs / 2.0f;
     return maximum(min(q, vec3(0.0f)));
 }
 
-__device__ float sd_simple_bounding_box(vec3 p, vec3 bb_min, vec3 bb_max) {
+__device__ float sd_simple_bounding_box(const vec3 p, const vec3 bb_min, const vec3 bb_max) {
     return max(
         max(
             bb_min.x - p.x,
@@ -87,13 +87,13 @@ __device__ float sd_simple_bounding_box(vec3 p, vec3 bb_min, vec3 bb_max) {
     );
 }
 
-__device__ float sd_unit_cube(vec3 p) {
+__device__ float sd_unit_cube(const vec3 p) {
     return sd_box(p, vec3(0.0f), vec3(1.0f));
 }
 
 //
 
-__device__ float sd_axes(vec3 p) {
+__device__ float sd_axes(const vec3 p) {
     vec3 px = p;
     px.x = wrap(p.x, -0.5f, 0.5f);
     vec3 py = p;
@@ -113,10 +113,10 @@ struct RuntimeStackNode {
 #define SD_RUNTIME_STACK_MAX_DEPTH 32
 
 __device__ float sd_composition(
-    vec3 p,
-    float cd,
-    SdRuntimeSceneGeometry geometry,
-    int composition_index
+    const vec3 p,
+    const float cd,
+    const SdRuntimeSceneGeometry geometry,
+    const int composition_index
 ) {
     int stack_index = 0;
     unsigned int index = composition_index;
@@ -298,7 +298,7 @@ __device__ float sd_composition(
 // surface
 
 template<typename SFunc>
-__device__ auto make_generic_sds(SFunc sd_func, RenderSurfaceData surface) {
+__device__ auto make_generic_sds(const SFunc sd_func, const RenderSurfaceData surface) {
     return [=](vec3 p, float cd, RenderSurfaceData &surface_output) {
         float sd = sd_func(p, cd);
         if (sd <= cd) {
@@ -310,8 +310,8 @@ __device__ auto make_generic_sds(SFunc sd_func, RenderSurfaceData surface) {
 
 template<typename SFunc, typename SurfFunc>
 __device__ auto make_generic_location_dependent_sds(
-    SFunc sd_func,
-    SurfFunc surface_func
+    const SFunc sd_func,
+    const SurfFunc surface_func
 ) {
     return [surface_func, sd_func](vec3 p, float cd, RenderSurfaceData &surface_output) {
         float sd = sd_func(p, cd);
@@ -326,7 +326,7 @@ __device__ auto make_generic_location_dependent_sds(
 #define NORMAL_EPSILON_CD NORMAL_EPSILON * 4.0f
 
 template<typename SFunc>
-__device__ vec3 sd_normal(vec3 p, SFunc sd_func) {
+__device__ vec3 sd_normal(const vec3 p, const SFunc sd_func) {
     float dx = (-sd_func(vec3(p.x + 2.0f * NORMAL_EPSILON, p.y, p.z), NORMAL_EPSILON_CD) +
                 8.0f * sd_func(vec3(p.x + NORMAL_EPSILON, p.y, p.z), NORMAL_EPSILON_CD) -
                 8.0f * sd_func(vec3(p.x - NORMAL_EPSILON, p.y, p.z), NORMAL_EPSILON_CD) +
