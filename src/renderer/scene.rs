@@ -436,6 +436,8 @@ fn fill_scene_geometry_non_leaf_bounding_boxes(node: &mut SdCompositionNode) {
     fill_scene_geometry_node_bounding_boxes(node);
 }
 
+const USE_MESH_TRIANGLE_PRIMITIVE_DECOMPOSITION: bool = true;
+
 fn collect_scene_geometry(
     nodes: &mut Query<
         (
@@ -470,33 +472,25 @@ fn collect_scene_geometry(
         let (_id, trn, primitive, composition, _visual) = nodes.get(id).ok()?;
 
         if let Some(composition) = composition {
-            match composition {
-                SdComposition::Intersect(children) => {
-                    return Some(SdCompositionNode {
-                        variant: SdCompositionNodeVariant::Intersect,
-                        children: children
-                            .iter()
-                            .filter_map(|child| {
-                                convert(child.clone(), nodes, mesh_collection, meshes)
-                            })
-                            .collect(),
-                        ..default()
-                    });
-                }
-                SdComposition::Union(children) => {
-                    return Some(SdCompositionNode {
-                        variant: SdCompositionNodeVariant::Union,
-                        children: children
-                            .iter()
-                            .filter_map(|child| {
-                                convert(child.clone(), nodes, mesh_collection, meshes)
-                            })
-                            .collect(),
-                        ..default()
-                    });
-                }
+            return match composition {
+                SdComposition::Intersect(children) => Some(SdCompositionNode {
+                    variant: SdCompositionNodeVariant::Intersect,
+                    children: children
+                        .iter()
+                        .filter_map(|child| convert(child.clone(), nodes, mesh_collection, meshes))
+                        .collect(),
+                    ..default()
+                }),
+                SdComposition::Union(children) => Some(SdCompositionNode {
+                    variant: SdCompositionNodeVariant::Union,
+                    children: children
+                        .iter()
+                        .filter_map(|child| convert(child.clone(), nodes, mesh_collection, meshes))
+                        .collect(),
+                    ..default()
+                }),
                 SdComposition::Difference(children) => {
-                    return if children.len() == 0 {
+                    if children.len() == 0 {
                         None
                     } else if children.len() == 1 {
                         convert(children[0].clone(), nodes, mesh_collection, meshes)
@@ -528,45 +522,38 @@ fn collect_scene_geometry(
                         )
                     }
                 }
-                SdComposition::Mirror(children) => {
-                    return Some(SdCompositionNode {
-                        variant: SdCompositionNodeVariant::Mirror(trn.translation(), trn.forward()),
-                        children: children
-                            .iter()
-                            .filter_map(|child| {
-                                convert(child.clone(), nodes, mesh_collection, meshes)
-                            })
-                            .collect(),
-                        ..default()
-                    });
-                }
-            }
+                SdComposition::Mirror(children) => Some(SdCompositionNode {
+                    variant: SdCompositionNodeVariant::Mirror(trn.translation(), trn.forward()),
+                    children: children
+                        .iter()
+                        .filter_map(|child| convert(child.clone(), nodes, mesh_collection, meshes))
+                        .collect(),
+                    ..default()
+                }),
+            };
         } else if let Some(primitive) = primitive {
             let trn_c = trn.compute_transform();
 
-            let primitive_node = match primitive {
+            return match primitive {
                 SdPrimitive::Mesh(mesh_handle) => {
-                    let next_mesh_id = mesh_collection.len() as u32;
-                    let mesh_id = match mesh_collection.entry(mesh_handle.clone()) {
-                        std::collections::hash_map::Entry::Vacant(entry) => {
-                            entry.insert(next_mesh_id);
-                            next_mesh_id
-                        }
-                        std::collections::hash_map::Entry::Occupied(entry) => entry.get().clone(),
-                    };
-
                     let mesh = meshes.get(mesh_handle);
 
                     if let Some(mesh) = mesh {
                         let bb = mesh.compute_aabb();
 
                         if let Some(bb) = bb {
-                            Some(SdPrimitiveNode {
-                                variant: SdPrimitiveNodeVariant::Mesh,
-                                translation: trn_c.translation + Vec3::from(bb.center),
-                                scale: trn_c.scale * bb.half_extents.max_element() * 2.0,
-                                rotation: trn_c.rotation,
-                                mesh_id: mesh_id,
+                            let translation = trn_c.translation;
+                            let scale = trn_c.scale;
+                            let rotation = trn_c.rotation;
+
+                            Some(SdCompositionNode {
+                                variant: SdCompositionNodeVariant::Union,
+                                children: decompose_scene_mesh_into_triangles(
+                                    translation,
+                                    scale,
+                                    rotation,
+                                    mesh,
+                                ),
                                 ..default()
                             })
                         } else {
@@ -576,43 +563,47 @@ fn collect_scene_geometry(
                         None
                     }
                 }
-                SdPrimitive::Triangle(vertices) => Some(SdPrimitiveNode {
-                    variant: SdPrimitiveNodeVariant::Triangle,
-                    triangle_v0: trn.transform_point(vertices[0]),
-                    triangle_v1: trn.transform_point(vertices[1]),
-                    triangle_v2: trn.transform_point(vertices[2]),
-                    ..default()
-                }),
-                _ => Some(SdPrimitiveNode {
-                    variant: match primitive {
-                        SdPrimitive::Sphere(_) => SdPrimitiveNodeVariant::Sphere,
-                        SdPrimitive::Box(_) => SdPrimitiveNodeVariant::Cube,
-                        SdPrimitive::Mandelbulb(_) => SdPrimitiveNodeVariant::Mandelbulb,
-                        SdPrimitive::Mesh(_) => SdPrimitiveNodeVariant::Mesh,
-                        SdPrimitive::Triangle(_) => SdPrimitiveNodeVariant::Triangle,
-                    },
-                    translation: trn_c.translation,
-                    scale: match primitive {
-                        SdPrimitive::Sphere(radius) => Vec3::ONE * *radius,
-                        SdPrimitive::Box(size) => size.clone(),
-                        SdPrimitive::Mandelbulb(radius) => Vec3::ONE * *radius,
-                        SdPrimitive::Mesh(_) => Vec3::ONE,
-                        SdPrimitive::Triangle(_) => Vec3::ONE,
-                    } * trn_c.scale,
-                    rotation: trn_c.rotation,
-                    ..default()
-                }),
-            };
+                _ => {
+                    let primitive_node = match primitive {
+                        SdPrimitive::Triangle(vertices) => Some(SdPrimitiveNode {
+                            variant: SdPrimitiveNodeVariant::Triangle,
+                            triangle_v0: trn.transform_point(vertices[0]),
+                            triangle_v1: trn.transform_point(vertices[1]),
+                            triangle_v2: trn.transform_point(vertices[2]),
+                            ..default()
+                        }),
+                        _ => Some(SdPrimitiveNode {
+                            variant: match primitive {
+                                SdPrimitive::Sphere(_) => SdPrimitiveNodeVariant::Sphere,
+                                SdPrimitive::Box(_) => SdPrimitiveNodeVariant::Cube,
+                                SdPrimitive::Mandelbulb(_) => SdPrimitiveNodeVariant::Mandelbulb,
+                                SdPrimitive::Mesh(_) => SdPrimitiveNodeVariant::Mesh,
+                                SdPrimitive::Triangle(_) => SdPrimitiveNodeVariant::Triangle,
+                            },
+                            translation: trn_c.translation,
+                            scale: match primitive {
+                                SdPrimitive::Sphere(radius) => Vec3::ONE * *radius,
+                                SdPrimitive::Box(size) => size.clone(),
+                                SdPrimitive::Mandelbulb(radius) => Vec3::ONE * *radius,
+                                SdPrimitive::Mesh(_) => Vec3::ONE,
+                                SdPrimitive::Triangle(_) => Vec3::ONE,
+                            } * trn_c.scale,
+                            rotation: trn_c.rotation,
+                            ..default()
+                        }),
+                    };
 
-            if let Some(primitive_node) = primitive_node {
-                return Some(SdCompositionNode {
-                    bounding_box: primitive_node.bounding_box(),
-                    variant: SdCompositionNodeVariant::Primitive(primitive_node),
-                    children: Vec::new(),
-                });
-            } else {
-                return None;
-            }
+                    if let Some(primitive_node) = primitive_node {
+                        Some(SdCompositionNode {
+                            bounding_box: primitive_node.bounding_box(),
+                            variant: SdCompositionNodeVariant::Primitive(primitive_node),
+                            children: Vec::new(),
+                        })
+                    } else {
+                        None
+                    }
+                }
+            };
         }
 
         return None;
@@ -635,6 +626,49 @@ fn collect_scene_geometry(
     node.flatten();
 
     return node.normalize();
+}
+
+fn decompose_scene_mesh_into_triangles(
+    translation: Vec3,
+    scale: Vec3,
+    rotation: Quat,
+    mesh: &Mesh,
+) -> Vec<SdCompositionNode> {
+    let mut triangles = Vec::new();
+
+    if mesh.primitive_topology() != PrimitiveTopology::TriangleList {
+        panic!("Ray Marcher can only handle triangle list topologies");
+    }
+
+    let positions = match mesh.attribute(MeshVertexAttributeId::from(Mesh::ATTRIBUTE_POSITION)) {
+        Some(VertexAttributeValues::Float32x3(positions)) => positions,
+        _ => panic!("Expected Float32x3 position attributes to be present in mesh"),
+    };
+
+    mesh.indices().iter().for_each(|island| {
+        island.iter().chunks(3).into_iter().for_each(|face| {
+            let mut triangle = [Vec3::ZERO; 3];
+
+            println!("");
+            face.enumerate().for_each(|(vertex_idx, vertex_id)| {
+                triangle[vertex_idx] = Vec3::from(positions[vertex_id]);
+                println!("{}", triangle[vertex_idx]);
+            });
+
+            triangles.push(SdCompositionNode {
+                variant: SdCompositionNodeVariant::Primitive(SdPrimitiveNode {
+                    variant: SdPrimitiveNodeVariant::Triangle,
+                    triangle_v0: translation + rotation.mul_vec3(triangle[0] * scale),
+                    triangle_v1: translation + rotation.mul_vec3(triangle[1] * scale),
+                    triangle_v2: translation + rotation.mul_vec3(triangle[2] * scale),
+                    ..default()
+                }),
+                ..default()
+            });
+        });
+    });
+
+    return triangles;
 }
 
 fn compile_scene_mesh(

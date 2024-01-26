@@ -201,7 +201,7 @@ __device__ float sd_composition(
             );
         }
 
-        if (bound_distance > cd + 1.0f) {
+        if (bound_distance > cd) {
             // early-bounding box return
             sd = bound_distance;
 
@@ -239,9 +239,9 @@ __device__ float sd_composition(
                     sd = sd_triangle(
                         position,
                         vec3(
-                            appendix_triangle->bb_v0 & 1 ? node.bound_min[0] : node.bound_max[0],
-                            appendix_triangle->bb_v0 & 2 ? node.bound_min[1] : node.bound_max[1],
-                            appendix_triangle->bb_v0 & 4 ? node.bound_min[2] : node.bound_max[2]
+                            appendix_triangle->bb_v0 & 1 ? node.bound_max[0] : node.bound_min[0],
+                            appendix_triangle->bb_v0 & 2 ? node.bound_max[1] : node.bound_min[1],
+                            appendix_triangle->bb_v0 & 4 ? node.bound_max[2] : node.bound_min[2]
                         ),
                         from_array(appendix_triangle->v1),
                         from_array(appendix_triangle->v2)

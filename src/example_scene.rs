@@ -147,7 +147,7 @@ pub fn setup_scene(
             ..default()
         },
         SdPrimitive::Mesh(assets.load("models/monkey.obj")),
-        SdVisual { enabled: false },
+        SdVisual { enabled: true },
         TogglableVisual::default(),
     ));
 
