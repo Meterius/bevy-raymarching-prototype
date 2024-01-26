@@ -116,7 +116,7 @@ __device__ float dot2(const vec3 x) {
     return dot(x, x);
 }
 
-__device__ float sd_triangle(const vec3 p, vec3 a, vec3 b, vec3 c) {
+__device__ float sd_triangle(const vec3 p, const vec3 a, const vec3 b, const vec3 c) {
     vec3 ba = b - a;
     vec3 pa = p - a;
     vec3 cb = c - b;
@@ -201,7 +201,7 @@ __device__ float sd_composition(
             );
         }
 
-        if (bound_distance > cd + 0.001) {
+        if (bound_distance > cd + 0.001f) {
             // early-bounding box return
             sd = bound_distance;
 
@@ -237,7 +237,7 @@ __device__ float sd_composition(
                         vec3(
                             appendix_triangle->bb_v0 & 1 ? node.bound_max[0] : node.bound_min[0],
                             appendix_triangle->bb_v0 & 2 ? node.bound_max[1] : node.bound_min[1],
-                            appendix_triangle->bb_v0 & 4 ? node.bound_max[2] : node.bound_min[2]
+                            appendix_triangle->v0_z
                         ),
                         from_array(appendix_triangle->v1),
                         from_array(appendix_triangle->v2)

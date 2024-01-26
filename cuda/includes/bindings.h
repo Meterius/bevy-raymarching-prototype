@@ -139,11 +139,11 @@ struct SdCompositionPrimitiveAppendix {
 struct SdCompositionPrimitiveTriangleAppendix {
     float v1[3];
     float v2[3];
-    // one of the vertices aligns with a corner of the bounding box,
+    // one of the vertices aligns in at least elements with a corner of the bounding box,
     // it can be reconstructed using a bit-vector that encodes the corner,
-    // the first three bits indicate whether min or max plane is hit
+    // the two bits indicate whether min or max plane is hit
     unsigned int bb_v0;
-    char padding[4];
+    float v0_z;
 };
 
 struct SdRuntimeSceneLighting {

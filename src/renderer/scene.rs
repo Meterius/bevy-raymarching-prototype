@@ -786,9 +786,10 @@ fn convert_node_to_native(
         }
         SdCompositionNodeVariant::Primitive(primitive) => match primitive.variant {
             SdPrimitiveNodeVariant::Triangle => {
+                let mut v0: Vec3 = Vec3::ZERO;
                 let mut v1: Vec3 = Vec3::ZERO;
                 let mut v2: Vec3 = Vec3::ZERO;
-                let mut bb_v0: [bool; 3] = [false; 3];
+                let mut bb_v0: [bool; 2] = [false; 2];
                 let vertices = [
                     primitive.triangle_v0,
                     primitive.triangle_v1,
@@ -796,9 +797,9 @@ fn convert_node_to_native(
                 ];
 
                 for i in 0..3 {
-                    let v0 = vertices[i];
+                    v0 = vertices[i];
 
-                    if (0..3).all(|axis| {
+                    if (0..2).all(|axis| {
                         native_entry.bound_min[axis] == v0[axis]
                             || native_entry.bound_max[axis] == v0[axis]
                     }) {
@@ -806,14 +807,14 @@ fn convert_node_to_native(
                         v2 = vertices[(i + 2) % 3];
                         bb_v0[0] = native_entry.bound_max[0] == v0[0];
                         bb_v0[1] = native_entry.bound_max[1] == v0[1];
-                        bb_v0[2] = native_entry.bound_max[2] == v0[2];
                         break;
                     }
                 }
 
                 SdCompositionAppendix::PrimitiveTriangle(
                     cuda::SdCompositionPrimitiveTriangleAppendix {
-                        bb_v0: bb_v0[0] as u32 * 1 + bb_v0[1] as u32 * 2 + bb_v0[2] as u32 * 4,
+                        bb_v0: bb_v0[0] as u32 * 1 + bb_v0[1] as u32 * 2,
+                        v0_z: v0.z,
                         v1: v1.to_array(),
                         v2: v2.to_array(),
                         ..default()

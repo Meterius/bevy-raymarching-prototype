@@ -70,9 +70,9 @@ pub fn setup_scene(
     };
 
     let mut mirrored = vec![
-        spawn_example(SdCompositionNodeVariant::Union),
-        spawn_example(SdCompositionNodeVariant::Intersect),
-        spawn_example(SdCompositionNodeVariant::Difference),
+        // spawn_example(SdCompositionNodeVariant::Union),
+        // spawn_example(SdCompositionNodeVariant::Intersect),
+        // spawn_example(SdCompositionNodeVariant::Difference),
     ];
 
     commands
@@ -82,7 +82,7 @@ pub fn setup_scene(
                 ..default()
             },
             bevy::core::Name::new("Box"),
-            SdVisual::default(),
+            SdVisual { enabled: false },
             SdPrimitive::Box(Vec3::new(30.0, 1.0, 30.0)),
         ))
         .id();
@@ -113,7 +113,7 @@ pub fn setup_scene(
                 axis: Vec3::Y,
                 cycle_duration: 60.0,
             },
-            SdVisual { enabled: true },
+            SdVisual { enabled: false },
         ))
         .id();
 
@@ -136,20 +136,24 @@ pub fn setup_scene(
             Vec3::new(1.0, 2.0, 1.0),
             Vec3::new(-1.0, 1.0, 2.0),
         ]),
-        SdVisual { enabled: true },
+        SdVisual { enabled: false },
     ));
 
-    commands.spawn((
-        PbrBundle {
-            transform: Transform::from_xyz(7.5, 5.0, 0.0),
-            mesh: assets.load("models/obj1.obj"),
-            material: materials.add(Color::rgb_u8(124, 144, 255).into()),
-            ..default()
-        },
-        SdPrimitive::Mesh(assets.load("models/obj1.obj")),
-        SdVisual { enabled: true },
-        TogglableVisual::default(),
-    ));
+    for i in 0..1 {
+        for j in 0..1 {
+            commands.spawn((
+                PbrBundle {
+                    transform: Transform::from_xyz(2.5 * i as f32 - 5.0, 1.0, 2.5 * j as f32 - 5.0),
+                    mesh: assets.load("models/obj1.obj"),
+                    material: materials.add(Color::rgb_u8(124, 144, 255).into()),
+                    ..default()
+                },
+                SdPrimitive::Mesh(assets.load("models/obj1.obj")),
+                SdVisual { enabled: true },
+                TogglableVisual::default(),
+            ));
+        }
+    }
 
     if false {
         let mut sphere_clouds = Vec::new();
