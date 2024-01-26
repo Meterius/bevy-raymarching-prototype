@@ -201,7 +201,7 @@ __device__ float sd_composition(
             );
         }
 
-        if (bound_distance > cd) {
+        if (bound_distance > cd + 0.001) {
             // early-bounding box return
             sd = bound_distance;
 
@@ -229,10 +229,6 @@ __device__ float sd_composition(
 
                 case SdPrimitiveVariant::Sphere:
                     sd = sd_unit_sphere(primitive_position / scale) * minimum(scale);
-                    break;
-
-                case SdPrimitiveVariant::Mesh:
-                    sd = sd_mesh(primitive_position, appendix->mesh_id, geometry);
                     break;
 
                 case SdPrimitiveVariant::Triangle:

@@ -104,7 +104,6 @@ enum SdPrimitiveVariant {
     Sphere,
     Cube,
     Mandelbulb,
-    Mesh,
     Triangle
 };
 

@@ -91,7 +91,6 @@ pub enum SdPrimitiveNodeVariant {
     Sphere,
     Cube,
     Mandelbulb,
-    Mesh,
     Triangle,
 }
 
@@ -101,7 +100,6 @@ pub struct SdPrimitiveNode {
     translation: Vec3,
     scale: Vec3,
     rotation: Quat,
-    mesh_id: u32,
     triangle_v0: Vec3,
     triangle_v1: Vec3,
     triangle_v2: Vec3,
@@ -577,8 +575,8 @@ fn collect_scene_geometry(
                                 SdPrimitive::Sphere(_) => SdPrimitiveNodeVariant::Sphere,
                                 SdPrimitive::Box(_) => SdPrimitiveNodeVariant::Cube,
                                 SdPrimitive::Mandelbulb(_) => SdPrimitiveNodeVariant::Mandelbulb,
-                                SdPrimitive::Mesh(_) => SdPrimitiveNodeVariant::Mesh,
                                 SdPrimitive::Triangle(_) => SdPrimitiveNodeVariant::Triangle,
+                                SdPrimitive::Mesh(_) => SdPrimitiveNodeVariant::Triangle,
                             },
                             translation: trn_c.translation,
                             scale: match primitive {
@@ -679,9 +677,6 @@ fn compile_scene_mesh(
     triangle_offset: &mut usize,
 ) {
     if let Some(bb) = mesh.compute_aabb() {
-        let center = Vec3::from(bb.center);
-        let scale = bb.half_extents.max_element() * 2.0;
-
         if mesh.primitive_topology() != PrimitiveTopology::TriangleList {
             panic!("Ray Marcher can only handle triangle list topologies");
         }
@@ -776,7 +771,6 @@ fn convert_node_to_native(
             SdPrimitiveNodeVariant::Cube => cuda::SdPrimitiveVariant_Cube,
             SdPrimitiveNodeVariant::Sphere => cuda::SdPrimitiveVariant_Sphere,
             SdPrimitiveNodeVariant::Mandelbulb => cuda::SdPrimitiveVariant_Mandelbulb,
-            SdPrimitiveNodeVariant::Mesh => cuda::SdPrimitiveVariant_Mesh,
             SdPrimitiveNodeVariant::Triangle => cuda::SdPrimitiveVariant_Triangle,
         },
         _ => cuda::SdPrimitiveVariant_None,
@@ -834,7 +828,6 @@ fn convert_node_to_native(
                     primitive.rotation.y,
                     primitive.rotation.z,
                 ],
-                mesh_id: primitive.mesh_id,
                 ..default()
             }),
         },
