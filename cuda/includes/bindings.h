@@ -4,7 +4,7 @@
 
 #define CUDA_DEBUG false
 
-#define CONE_MARCH_LEVELS 3
+#define CONE_MARCH_LEVELS 2
 #define MAX_SUN_LIGHT_COUNT 1
 #define MAX_POINT_LIGHT_COUNT 1
 #define MAX_COMPOSITION_NODE_COUNT 4096
@@ -118,7 +118,8 @@ struct SdComposition {
     float bound_max[3];
     float bound_min[3];
 
-    unsigned int child;
+    unsigned int child: 24;
+    unsigned int second_child_offset: 8;
     unsigned int parent: 24;
     enum SdCompositionVariant variant: 4;
     enum SdPrimitiveVariant primitive_variant: 4;

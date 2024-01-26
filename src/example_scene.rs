@@ -139,16 +139,20 @@ pub fn setup_scene(
         SdVisual { enabled: false },
     ));
 
-    for i in 0..1 {
-        for j in 0..1 {
+    for i in 0..5 {
+        for j in 0..5 {
             commands.spawn((
                 PbrBundle {
-                    transform: Transform::from_xyz(2.5 * i as f32 - 5.0, 1.0, 2.5 * j as f32 - 5.0),
-                    mesh: assets.load("models/obj1.obj"),
+                    transform: Transform::from_xyz(
+                        10.0 * i as f32 - 5.0,
+                        1.0,
+                        10.0 * j as f32 - 5.0,
+                    ),
+                    mesh: assets.load("models/monkey.obj"),
                     material: materials.add(Color::rgb_u8(124, 144, 255).into()),
                     ..default()
                 },
-                SdPrimitive::Mesh(assets.load("models/obj1.obj")),
+                SdPrimitive::Mesh(assets.load("models/monkey.obj")),
                 SdVisual { enabled: true },
                 TogglableVisual::default(),
             ));
@@ -252,8 +256,8 @@ pub fn setup_scene(
                 is_active: false,
                 ..default()
             },
-            transform: Transform::from_xyz(5.0, 5.0, -5.0)
-                .looking_at(Vec3::new(0.0, 2.0, 0.0), Vec3::Y),
+            transform: Transform::from_xyz(5.0, 7.0, -5.0)
+                .looking_at(Vec3::new(25.0, 2.0, 25.0), Vec3::Y),
             ..default()
         },
         FlyCam,

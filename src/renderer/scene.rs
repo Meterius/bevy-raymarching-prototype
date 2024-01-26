@@ -647,10 +647,8 @@ fn decompose_scene_mesh_into_triangles(
         island.iter().chunks(3).into_iter().for_each(|face| {
             let mut triangle = [Vec3::ZERO; 3];
 
-            println!("");
             face.enumerate().for_each(|(vertex_idx, vertex_id)| {
                 triangle[vertex_idx] = Vec3::from(positions[vertex_id]);
-                println!("{}", triangle[vertex_idx]);
             });
 
             triangles.push(SdCompositionNode {
@@ -749,21 +747,10 @@ fn convert_node_to_native(
     node: &SdCompositionNode,
 ) -> (cuda::SdComposition, SdCompositionAppendix) {
     let mut native_entry = cuda::SdComposition {
-        child: 0 as _,
         bound_min: node.bounding_box.0.to_array(),
         bound_max: node.bounding_box.1.to_array(),
         ..default()
     };
-
-    native_entry.set_parent(0 as _);
-
-    native_entry.set_variant(match &node.variant {
-        SdCompositionNodeVariant::Primitive(_) => cuda::SdCompositionVariant_Union,
-        SdCompositionNodeVariant::Union => cuda::SdCompositionVariant_Union,
-        SdCompositionNodeVariant::Difference => cuda::SdCompositionVariant_Difference,
-        SdCompositionNodeVariant::Intersect => cuda::SdCompositionVariant_Intersect,
-        SdCompositionNodeVariant::Mirror(_, _) => cuda::SdCompositionVariant_Mirror,
-    });
 
     native_entry.set_primitive_variant(match &node.variant {
         SdCompositionNodeVariant::Primitive(primitive) => match primitive.variant {
@@ -960,8 +947,14 @@ fn compile_scene_geometry(
             let (mut node, appendix) = convert_node_to_native(&item);
             node.set_parent(parent as _);
 
-            if child_idx == 0 && parent >= 0 {
-                geometry.compositions[parent as usize].child = composition_index as _;
+            if parent >= 0 {
+                if child_idx == 0 {
+                    geometry.compositions[parent as usize].set_child(composition_index as _);
+                } else {
+                    let offset = composition_index as isize
+                        - geometry.compositions[parent as usize].child() as isize;
+                    geometry.compositions[parent as usize].set_second_child_offset(offset as _);
+                }
             }
 
             geometry.compositions[composition_index] = node;

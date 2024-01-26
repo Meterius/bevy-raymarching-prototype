@@ -30,6 +30,7 @@ bindgen = "0.69.2"
 cc = "1.0.83"
 
 [profile.dev]
+incremental = true
 opt-level = 1
 
 [profile.dev.package."*"]

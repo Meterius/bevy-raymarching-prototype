@@ -411,12 +411,12 @@ dependencies = [
  "bevy",
  "bevy_editor_pls",
  "bevy_flycam",
-    "bevy_obj",
+ "bevy_obj",
  "bindgen",
  "bytemuck",
  "cc",
  "cudarc",
-    "itertools",
+ "itertools",
  "naga 0.14.2",
  "naga_oil 0.11.0",
  "nvtx",
@@ -908,13 +908,13 @@ version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faa21e1c717fa6beda59767c449c587578714bdf3efcd8b74b468749a73e8368"
 dependencies = [
-    "anyhow",
-    "bevy_app",
-    "bevy_asset",
-    "bevy_render",
-    "bevy_utils",
-    "thiserror",
-    "tobj",
+ "anyhow",
+ "bevy_app",
+ "bevy_asset",
+ "bevy_render",
+ "bevy_utils",
+ "thiserror",
+ "tobj",
 ]
 
 [[package]]
@@ -2384,7 +2384,7 @@ version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "25db6b064527c5d482d0423354fcd07a89a2dfe07b67892e62411946db7f07b0"
 dependencies = [
-    "either",
+ "either",
 ]
 
 [[package]]
@@ -3747,7 +3747,7 @@ version = "4.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f7ca3ec0405b0f2f95e0dbcced28882190dc79b0dac63ff82533d256d770223"
 dependencies = [
-    "ahash",
+ "ahash",
 ]
 
 [[package]]

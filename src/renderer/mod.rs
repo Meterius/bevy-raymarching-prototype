@@ -15,7 +15,7 @@ use cudarc::nvrtc::Ptx;
 use std::ffi::CString;
 use std::sync::Arc;
 
-const MAX_COMPOSITION_NODE_COUNT: usize = 160000;
+const MAX_COMPOSITION_NODE_COUNT: usize = 1000000;
 
 const MAX_VERTEX_COUNT: usize = 65536;
 const MAX_TRIANGLE_COUNT: usize = 65536;
@@ -38,7 +38,7 @@ impl Default for RenderConeCompression {
     fn default() -> Self {
         Self {
             enabled: true,
-            levels: [16, 8, 2],
+            levels: [8, 2],
         }
     }
 }

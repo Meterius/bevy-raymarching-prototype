@@ -404,6 +404,8 @@ extern "C" __global__ void compute_render(
     const SdRuntimeScene runtime_scene_param,
     const bool compression_enabled
 ) {
+    composition_traversal_count[threadIdx.x] = 0;
+
     if (!threadIdx.x) {
         runtime_scene = runtime_scene_param;
     }
@@ -488,7 +490,7 @@ extern "C" __global__ void compute_render(
 
     render_data_texture.texture[texture_index] = {
         ray_render.hit.depth,
-        (float) ray_render.hit.steps + entry.steps,
+        (float) composition_traversal_count[threadIdx.x],
         ray_render.hit.outcome,
         { ray_render.color.x, ray_render.color.y, ray_render.color.z },
         ray_render.light
@@ -599,6 +601,11 @@ extern "C" __global__ void compute_render_finalize(
 
     color = hdr_map_aces_tone(max(color, 0.0f));
     // color = vec3(texture_value.depth * 0.001f);
+    color = vec3(clamp(texture_value.steps * 0.0001f, 0.0f, 1.0f));
+
+    if (texture_value.steps > 5000.0f) {
+        color = vec3(1.0, 0.0, 0.0);
+    }
 
     unsigned int rgba = ((unsigned int) (255.0f * color.x) & 0xff) |
                         (((unsigned int) (255.0f * color.y) & 0xff) << 8) |
