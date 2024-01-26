@@ -416,6 +416,7 @@ dependencies = [
  "bytemuck",
  "cc",
  "cudarc",
+    "itertools",
  "naga 0.14.2",
  "naga_oil 0.11.0",
  "nvtx",
@@ -2375,6 +2376,15 @@ checksum = "4769cb30e5dcf1710fc6730d3e94f78c47723a014a567de385e113c737394640"
 dependencies = [
  "core-foundation-sys",
  "mach2",
+]
+
+[[package]]
+name = "itertools"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "25db6b064527c5d482d0423354fcd07a89a2dfe07b67892e62411946db7f07b0"
+dependencies = [
+    "either",
 ]
 
 [[package]]

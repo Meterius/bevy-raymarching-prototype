@@ -1,4 +1,4 @@
-use crate::example_scene::TogglableVisual;
+use crate::example_scene::{ExampleSceneSettings, TogglableVisual};
 use crate::renderer::scene::{RenderSceneSettings, SdVisual};
 use crate::renderer::{RenderCameraTarget, RenderConeCompression, RenderRelayCameraTarget};
 use bevy::{app::AppExit, prelude::*};
@@ -17,6 +17,7 @@ pub fn receive_input(
     mut movement_settings: ResMut<MovementSettings>,
     mut compression_settings: ResMut<RenderConeCompression>,
     mut render_settings: ResMut<RenderSceneSettings>,
+    mut e_scene_settings: ResMut<ExampleSceneSettings>,
     keyboard_input: Res<Input<KeyCode>>,
     mut exit: EventWriter<AppExit>,
 ) {
@@ -60,5 +61,9 @@ pub fn receive_input(
         for mut vis in togglable_visuals.iter_mut() {
             vis.enabled = !vis.enabled;
         }
+    }
+
+    if keyboard_input.just_pressed(KeyCode::B) {
+        e_scene_settings.enable_movement = !e_scene_settings.enable_movement;
     }
 }

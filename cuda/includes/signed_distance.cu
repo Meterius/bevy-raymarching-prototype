@@ -112,6 +112,48 @@ struct RuntimeStackNode {
 
 #define SD_RUNTIME_STACK_MAX_DEPTH 32
 
+__device__ float dot2(const vec3 x) {
+    return dot(x, x);
+}
+
+__device__ float sd_triangle(const vec3 p, vec3 a, vec3 b, vec3 c) {
+    vec3 ba = b - a;
+    vec3 pa = p - a;
+    vec3 cb = c - b;
+    vec3 pb = p - b;
+    vec3 ac = a - c;
+    vec3 pc = p - c;
+    vec3 nor = cross(ba, ac);
+
+    return sqrt(
+        (sign(dot(cross(ba, nor), pa)) +
+         sign(dot(cross(cb, nor), pb)) +
+         sign(dot(cross(ac, nor), pc)) < 2.0f)
+        ?
+        min(
+            min(
+                dot2(ba * clamp(dot(ba, pa) / dot2(ba), 0.0f, 1.0f) - pa),
+                dot2(cb * clamp(dot(cb, pb) / dot2(cb), 0.0f, 1.0f) - pb)),
+            dot2(ac * clamp(dot(ac, pc) / dot2(ac), 0.0f, 1.0f) - pc))
+        :
+        dot(nor, pa) * dot(nor, pa) / dot(nor, nor));
+}
+
+__device__ float sd_mesh(const vec3 p, const unsigned int mesh_id, const SdRuntimeSceneGeometry &geometry) {
+    auto mesh = &geometry.meshes.meshes[mesh_id];
+
+    float sd = MAX_POSITIVE_F32;
+
+    for (unsigned int i = mesh->triangle_start_id; i <= mesh->triangle_end_id; i++) {
+        vec3 v0 = from_array(geometry.meshes.vertices[geometry.meshes.triangles[i].vertex_ids[0]].pos);
+        vec3 v1 = from_array(geometry.meshes.vertices[geometry.meshes.triangles[i].vertex_ids[1]].pos);
+        vec3 v2 = from_array(geometry.meshes.vertices[geometry.meshes.triangles[i].vertex_ids[2]].pos);
+        sd = min(sd, sd_triangle(p, v0, v1, v2));
+    }
+
+    return sd;
+}
+
 __device__ float sd_composition(
     const vec3 p,
     const float cd,
@@ -188,6 +230,9 @@ __device__ float sd_composition(
                     break;
 
                 case SdPrimitiveVariant::Mesh:
+                    sd = sd_mesh(primitive_position, appendix->mesh_id, geometry);
+                    break;
+
                 case SdPrimitiveVariant::Cube:
                     sd = sd_box(primitive_position, vec3(0.0f), scale);
                     break;

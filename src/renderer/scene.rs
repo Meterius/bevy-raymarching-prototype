@@ -1,6 +1,11 @@
 use crate::bindings::cuda;
+use crate::bindings::cuda::MeshVertex;
 use crate::renderer::{RenderCudaContext, RenderSceneGeometry};
 use bevy::prelude::*;
+use bevy::render::mesh::{
+    MeshVertexAttribute, MeshVertexAttributeId, PrimitiveTopology, VertexAttributeValues,
+};
+use itertools::Itertools;
 use std::collections::{HashMap, VecDeque};
 
 #[derive(Debug, Clone, Component, Reflect)]
@@ -616,6 +621,78 @@ fn collect_scene_geometry(
     return node.normalize();
 }
 
+fn compile_scene_mesh(
+    geometry: &mut NonSendMut<RenderSceneGeometry>,
+    mesh: &Mesh,
+    mesh_id: u32,
+    vertex_offset: &mut usize,
+    triangle_offset: &mut usize,
+) {
+    if let Some(bb) = mesh.compute_aabb() {
+        let center = Vec3::from(bb.center);
+        let scale = bb.half_extents.max_element() * 2.0;
+
+        if mesh.primitive_topology() != PrimitiveTopology::TriangleList {
+            panic!("Ray Marcher can only handle triangle list topologies");
+        }
+
+        let positions = match mesh.attribute(MeshVertexAttributeId::from(Mesh::ATTRIBUTE_POSITION))
+        {
+            Some(VertexAttributeValues::Float32x3(positions)) => positions,
+            _ => panic!("Expected Float32x3 position attributes to be present in mesh"),
+        };
+
+        let triangle_start_id = *triangle_offset as u32;
+
+        mesh.indices().iter().for_each(|island| {
+            println!("Island {island:?}");
+
+            island
+                .iter()
+                .chunks(3)
+                .into_iter()
+                .enumerate()
+                .for_each(|(face_idx, face)| {
+                    println!("Triangle {triangle_offset}");
+
+                    let mut face_vertices = Vec::new();
+
+                    face.for_each(|idx| {
+                        println!("Vertex {vertex_offset}; Position {:?}", positions[idx]);
+
+                        face_vertices.push(*vertex_offset as u32);
+                        geometry.vertices[*vertex_offset] = cuda::MeshVertex {
+                            pos: positions[idx].clone(),
+                            ..default()
+                        };
+                        *vertex_offset += 1;
+                    });
+
+                    geometry.triangles[*triangle_offset] = cuda::MeshTriangle {
+                        vertex_ids: face_vertices
+                            .try_into()
+                            .expect("Expected 3 vertices per face"),
+                        ..default()
+                    };
+                    *triangle_offset += 1;
+                });
+        });
+
+        let triangle_end_id = *triangle_offset as u32 - 1;
+
+        geometry.meshes[mesh_id as usize] = cuda::Mesh {
+            triangle_start_id,
+            triangle_end_id,
+            ..default()
+        };
+    } else {
+        geometry.meshes[mesh_id as usize] = cuda::Mesh {
+            triangle_start_id: 1,
+            triangle_end_id: 0,
+        };
+    }
+}
+
 enum SdCompositionAppendix {
     None,
     Mirror(cuda::SdCompositionMirrorAppendix),
@@ -770,6 +847,21 @@ fn compile_scene_geometry(
         };
 
         root.pad_with_empties();
+
+        let mut vertex_offset = 0;
+        let mut triangle_offset = 0;
+
+        for (mesh_handle, mesh_id) in mesh_collection.iter() {
+            if let Some(mesh) = meshes.get(mesh_handle) {
+                compile_scene_mesh(
+                    &mut geometry,
+                    mesh,
+                    mesh_id.clone(),
+                    &mut vertex_offset,
+                    &mut triangle_offset,
+                );
+            }
+        }
 
         let mut queue = VecDeque::<(i32, usize, SdCompositionNode)>::new();
         queue.push_back((0, 0, root));

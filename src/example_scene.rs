@@ -129,11 +129,11 @@ pub fn setup_scene(
     commands.spawn((
         PbrBundle {
             transform: Transform::from_xyz(7.5, 5.0, 0.0),
-            mesh: assets.load("models/monkey.obj"),
+            mesh: assets.load("models/two-triangles.obj"),
             material: materials.add(Color::rgb_u8(124, 144, 255).into()),
             ..default()
         },
-        SdPrimitive::Mesh(assets.load("models/monkey.obj")),
+        SdPrimitive::Mesh(assets.load("models/two-triangles.obj")),
         SdVisual { enabled: true },
         TogglableVisual::default(),
     ));
@@ -305,6 +305,7 @@ fn set_center(
 }
 
 fn apply_motion(
+    settings: Res<ExampleSceneSettings>,
     time: Res<Time>,
     mut motions: Query<(
         &mut Transform,
@@ -313,27 +314,36 @@ fn apply_motion(
         Option<&RotateAxisMotion>,
     )>,
 ) {
-    for (mut trn, ax_mot, sp_mot, rot_mot) in motions.iter_mut() {
-        if let Some(ax_mot) = ax_mot {
-            trn.translation = ax_mot.center.unwrap_or_default()
-                + ax_mot.direction
-                    * (2.0 * std::f32::consts::PI * time.elapsed_seconds() / ax_mot.cycle_duration)
-                        .sin();
-        } else if let Some(sp_mot) = sp_mot {
-            let d = Vec3::ONE * 2.0 * std::f32::consts::PI * time.elapsed_seconds()
-                / sp_mot.cycle_durations;
+    if settings.enable_movement {
+        for (mut trn, ax_mot, sp_mot, rot_mot) in motions.iter_mut() {
+            if let Some(ax_mot) = ax_mot {
+                trn.translation = ax_mot.center.unwrap_or_default()
+                    + ax_mot.direction
+                        * (2.0 * std::f32::consts::PI * time.elapsed_seconds()
+                            / ax_mot.cycle_duration)
+                            .sin();
+            } else if let Some(sp_mot) = sp_mot {
+                let d = Vec3::ONE * 2.0 * std::f32::consts::PI * time.elapsed_seconds()
+                    / sp_mot.cycle_durations;
 
-            trn.translation = sp_mot.center.unwrap_or_default()
-                + sp_mot.distances * Vec3::new(d.x.sin(), d.y.sin(), d.z.sin());
-        }
+                trn.translation = sp_mot.center.unwrap_or_default()
+                    + sp_mot.distances * Vec3::new(d.x.sin(), d.y.sin(), d.z.sin());
+            }
 
-        if let Some(rot_mot) = rot_mot {
-            trn.rotation = Quat::from_axis_angle(
-                rot_mot.axis,
-                2.0 * std::f32::consts::PI * (time.elapsed_seconds() / rot_mot.cycle_duration),
-            );
+            if let Some(rot_mot) = rot_mot {
+                trn.rotation = Quat::from_axis_angle(
+                    rot_mot.axis,
+                    2.0 * std::f32::consts::PI * (time.elapsed_seconds() / rot_mot.cycle_duration),
+                );
+            }
         }
     }
+}
+
+#[derive(Debug, Default, Resource, Reflect)]
+#[reflect(Resource)]
+pub struct ExampleSceneSettings {
+    pub enable_movement: bool,
 }
 
 #[derive(Default)]
@@ -341,6 +351,7 @@ pub struct ExampleScenePlugin {}
 
 impl Plugin for ExampleScenePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (set_center, apply_motion.after(set_center)));
+        app.insert_resource(ExampleSceneSettings::default())
+            .add_systems(Update, (set_center, apply_motion.after(set_center)));
     }
 }
