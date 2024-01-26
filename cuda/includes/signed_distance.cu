@@ -213,6 +213,8 @@ __device__ float sd_composition(
             vec3 center = 0.5f * (from_array(node.bound_min) + from_array(node.bound_max));
 
             auto appendix = &reinterpret_cast<SdCompositionPrimitiveAppendix *>(geometry.compositions)[index + 1];
+            auto appendix_triangle = &reinterpret_cast<SdCompositionPrimitiveTriangleAppendix *>(geometry.compositions)[
+                index + 1];
 
             quat rot = from_quat_array(appendix->rotation);
             vec3 scale = from_array(appendix->scale);
@@ -231,6 +233,19 @@ __device__ float sd_composition(
 
                 case SdPrimitiveVariant::Mesh:
                     sd = sd_mesh(primitive_position, appendix->mesh_id, geometry);
+                    break;
+
+                case SdPrimitiveVariant::Triangle:
+                    sd = sd_triangle(
+                        position,
+                        vec3(
+                            appendix_triangle->bb_v0 & 1 ? node.bound_min[0] : node.bound_max[0],
+                            appendix_triangle->bb_v0 & 2 ? node.bound_min[1] : node.bound_max[1],
+                            appendix_triangle->bb_v0 & 4 ? node.bound_min[2] : node.bound_max[2]
+                        ),
+                        from_array(appendix_triangle->v1),
+                        from_array(appendix_triangle->v2)
+                    );
                     break;
 
                 case SdPrimitiveVariant::Cube:

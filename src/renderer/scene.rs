@@ -1,10 +1,7 @@
 use crate::bindings::cuda;
-use crate::bindings::cuda::MeshVertex;
 use crate::renderer::{RenderCudaContext, RenderSceneGeometry};
 use bevy::prelude::*;
-use bevy::render::mesh::{
-    MeshVertexAttribute, MeshVertexAttributeId, PrimitiveTopology, VertexAttributeValues,
-};
+use bevy::render::mesh::{MeshVertexAttributeId, PrimitiveTopology, VertexAttributeValues};
 use itertools::Itertools;
 use std::collections::{HashMap, VecDeque};
 
@@ -15,6 +12,7 @@ pub enum SdPrimitive {
     Box(Vec3),
     Mandelbulb(f32),
     Mesh(Handle<Mesh>),
+    Triangle([Vec3; 3]),
 }
 
 impl Default for SdPrimitive {
@@ -94,6 +92,7 @@ pub enum SdPrimitiveNodeVariant {
     Cube,
     Mandelbulb,
     Mesh,
+    Triangle,
 }
 
 #[derive(Default, Clone, Debug)]
@@ -102,12 +101,19 @@ pub struct SdPrimitiveNode {
     translation: Vec3,
     scale: Vec3,
     rotation: Quat,
-    mesh_id: Option<u32>,
+    mesh_id: u32,
+    triangle_v0: Vec3,
+    triangle_v1: Vec3,
+    triangle_v2: Vec3,
 }
 
 impl SdPrimitiveNode {
     fn bounding_box(&self) -> (Vec3, Vec3) {
         return match self.variant {
+            SdPrimitiveNodeVariant::Triangle => (
+                self.triangle_v0.min(self.triangle_v1.min(self.triangle_v2)),
+                self.triangle_v0.max(self.triangle_v1.max(self.triangle_v2)),
+            ),
             _ => {
                 let mut bb_min = Vec3::INFINITY;
                 let mut bb_max = Vec3::NEG_INFINITY;
@@ -124,7 +130,7 @@ impl SdPrimitiveNode {
                     }
                 }
 
-                return (bb_min + self.translation, bb_max + self.translation);
+                (bb_min + self.translation, bb_max + self.translation)
             }
         };
     }
@@ -225,7 +231,7 @@ impl SdCompositionNode {
                     scale: Vec3::ONE,
                     rotation: Quat::IDENTITY,
                     variant: SdPrimitiveNodeVariant::Empty,
-                    mesh_id: None,
+                    ..default()
                 }),
                 children: Vec::new(),
                 bounding_box: (Vec3::NEG_INFINITY, Vec3::INFINITY),
@@ -560,7 +566,8 @@ fn collect_scene_geometry(
                                 translation: trn_c.translation + Vec3::from(bb.center),
                                 scale: trn_c.scale * bb.half_extents.max_element() * 2.0,
                                 rotation: trn_c.rotation,
-                                mesh_id: Some(mesh_id),
+                                mesh_id: mesh_id,
+                                ..default()
                             })
                         } else {
                             None
@@ -569,12 +576,20 @@ fn collect_scene_geometry(
                         None
                     }
                 }
+                SdPrimitive::Triangle(vertices) => Some(SdPrimitiveNode {
+                    variant: SdPrimitiveNodeVariant::Triangle,
+                    triangle_v0: trn.transform_point(vertices[0]),
+                    triangle_v1: trn.transform_point(vertices[1]),
+                    triangle_v2: trn.transform_point(vertices[2]),
+                    ..default()
+                }),
                 _ => Some(SdPrimitiveNode {
                     variant: match primitive {
                         SdPrimitive::Sphere(_) => SdPrimitiveNodeVariant::Sphere,
                         SdPrimitive::Box(_) => SdPrimitiveNodeVariant::Cube,
                         SdPrimitive::Mandelbulb(_) => SdPrimitiveNodeVariant::Mandelbulb,
                         SdPrimitive::Mesh(_) => SdPrimitiveNodeVariant::Mesh,
+                        SdPrimitive::Triangle(_) => SdPrimitiveNodeVariant::Triangle,
                     },
                     translation: trn_c.translation,
                     scale: match primitive {
@@ -582,9 +597,10 @@ fn collect_scene_geometry(
                         SdPrimitive::Box(size) => size.clone(),
                         SdPrimitive::Mandelbulb(radius) => Vec3::ONE * *radius,
                         SdPrimitive::Mesh(_) => Vec3::ONE,
+                        SdPrimitive::Triangle(_) => Vec3::ONE,
                     } * trn_c.scale,
                     rotation: trn_c.rotation,
-                    mesh_id: None,
+                    ..default()
                 }),
             };
 
@@ -697,6 +713,7 @@ enum SdCompositionAppendix {
     None,
     Mirror(cuda::SdCompositionMirrorAppendix),
     Primitive(cuda::SdCompositionPrimitiveAppendix),
+    PrimitiveTriangle(cuda::SdCompositionPrimitiveTriangleAppendix),
 }
 
 fn convert_node_to_native(
@@ -726,6 +743,7 @@ fn convert_node_to_native(
             SdPrimitiveNodeVariant::Sphere => cuda::SdPrimitiveVariant_Sphere,
             SdPrimitiveNodeVariant::Mandelbulb => cuda::SdPrimitiveVariant_Mandelbulb,
             SdPrimitiveNodeVariant::Mesh => cuda::SdPrimitiveVariant_Mesh,
+            SdPrimitiveNodeVariant::Triangle => cuda::SdPrimitiveVariant_Triangle,
         },
         _ => cuda::SdPrimitiveVariant_None,
     });
@@ -738,8 +756,43 @@ fn convert_node_to_native(
                 ..default()
             })
         }
-        SdCompositionNodeVariant::Primitive(primitive) => {
-            SdCompositionAppendix::Primitive(cuda::SdCompositionPrimitiveAppendix {
+        SdCompositionNodeVariant::Primitive(primitive) => match primitive.variant {
+            SdPrimitiveNodeVariant::Triangle => {
+                let mut v1: Vec3 = Vec3::ZERO;
+                let mut v2: Vec3 = Vec3::ZERO;
+                let mut bb_v0: [bool; 3] = [false; 3];
+                let vertices = [
+                    primitive.triangle_v0,
+                    primitive.triangle_v1,
+                    primitive.triangle_v2,
+                ];
+
+                for i in 0..3 {
+                    let v0 = vertices[i];
+
+                    if (0..3).all(|axis| {
+                        native_entry.bound_min[axis] == v0[axis]
+                            || native_entry.bound_max[axis] == v0[axis]
+                    }) {
+                        v1 = vertices[(i + 1) % 3];
+                        v2 = vertices[(i + 2) % 3];
+                        bb_v0[0] = native_entry.bound_max[0] == v0[0];
+                        bb_v0[1] = native_entry.bound_max[1] == v0[1];
+                        bb_v0[2] = native_entry.bound_max[2] == v0[2];
+                        break;
+                    }
+                }
+
+                SdCompositionAppendix::PrimitiveTriangle(
+                    cuda::SdCompositionPrimitiveTriangleAppendix {
+                        bb_v0: bb_v0[0] as u32 * 1 + bb_v0[1] as u32 * 2 + bb_v0[2] as u32 * 4,
+                        v1: v1.to_array(),
+                        v2: v2.to_array(),
+                        ..default()
+                    },
+                )
+            }
+            _ => SdCompositionAppendix::Primitive(cuda::SdCompositionPrimitiveAppendix {
                 scale: primitive.scale.to_array(),
                 rotation: [
                     primitive.rotation.w,
@@ -747,10 +800,10 @@ fn convert_node_to_native(
                     primitive.rotation.y,
                     primitive.rotation.z,
                 ],
-                mesh_id: primitive.mesh_id.unwrap_or_default(),
+                mesh_id: primitive.mesh_id,
                 ..default()
-            })
-        }
+            }),
+        },
         _ => SdCompositionAppendix::None,
     };
 
@@ -898,6 +951,10 @@ fn compile_scene_geometry(
                     Some(unsafe { std::mem::transmute::<_, cuda::SdComposition>(item) }),
                 ),
                 SdCompositionAppendix::Primitive(item) => (
+                    2,
+                    Some(unsafe { std::mem::transmute::<_, cuda::SdComposition>(item) }),
+                ),
+                SdCompositionAppendix::PrimitiveTriangle(item) => (
                     2,
                     Some(unsafe { std::mem::transmute::<_, cuda::SdComposition>(item) }),
                 ),

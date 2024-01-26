@@ -127,6 +127,19 @@ pub fn setup_scene(
     ));
 
     commands.spawn((
+        SpatialBundle {
+            transform: Transform::from_xyz(0.0, 5.0, 10.0),
+            ..default()
+        },
+        SdPrimitive::Triangle([
+            Vec3::new(1.0, 1.0, 1.0),
+            Vec3::new(1.0, 2.0, 1.0),
+            Vec3::new(-1.0, 1.0, 2.0),
+        ]),
+        SdVisual { enabled: true },
+    ));
+
+    commands.spawn((
         PbrBundle {
             transform: Transform::from_xyz(7.5, 5.0, 0.0),
             mesh: assets.load("models/monkey.obj"),
@@ -134,7 +147,7 @@ pub fn setup_scene(
             ..default()
         },
         SdPrimitive::Mesh(assets.load("models/monkey.obj")),
-        SdVisual { enabled: true },
+        SdVisual { enabled: false },
         TogglableVisual::default(),
     ));
 

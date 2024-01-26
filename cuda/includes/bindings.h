@@ -104,7 +104,8 @@ enum SdPrimitiveVariant {
     Sphere,
     Cube,
     Mandelbulb,
-    Mesh
+    Mesh,
+    Triangle
 };
 
 enum SdCompositionVariant {
@@ -134,6 +135,16 @@ struct SdCompositionPrimitiveAppendix {
     float scale[3];
     float rotation[4];
     unsigned int mesh_id; // only valid if primitive is mesh
+};
+
+struct SdCompositionPrimitiveTriangleAppendix {
+    float v1[3];
+    float v2[3];
+    // one of the vertices aligns with a corner of the bounding box,
+    // it can be reconstructed using a bit-vector that encodes the corner,
+    // the first three bits indicate whether min or max plane is hit
+    unsigned int bb_v0;
+    char padding[4];
 };
 
 struct SdRuntimeSceneLighting {
