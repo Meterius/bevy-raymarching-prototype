@@ -143,8 +143,6 @@ __device__ float sd_composition(
         SdComposition node = geometry.compositions[index];
         RuntimeStackNode *stack_node = &sd_runtime_stack[stack_index];
 
-        vec3 center = 0.5f * (from_array(node.bound_min) + from_array(node.bound_max));
-
         // set the parents child offset when invoking the node
         second_child_offset.set(
             stack_index - 1,
@@ -153,9 +151,13 @@ __device__ float sd_composition(
         );
 
         // determine bb distance when invoking the node
-        float bound_distance = !returning ? sd_simple_bounding_box(
-            position, from_array(node.bound_min), from_array(node.bound_max)
-        ) : 0.0f;
+        float bound_distance = 0.0f;
+
+        if (!returning) {
+            bound_distance = sd_simple_bounding_box(
+                position, from_array(node.bound_min), from_array(node.bound_max)
+            );
+        }
 
         if (bound_distance > cd + 1.0f) {
             // early-bounding box return
@@ -166,6 +168,7 @@ __device__ float sd_composition(
             returning = true;
         } else if (node.primitive_variant != SdPrimitiveVariant::None) {
             // primitive return
+            vec3 center = 0.5f * (from_array(node.bound_min) + from_array(node.bound_max));
 
             auto appendix = &reinterpret_cast<SdCompositionPrimitiveAppendix *>(geometry.compositions)[index + 1];
 

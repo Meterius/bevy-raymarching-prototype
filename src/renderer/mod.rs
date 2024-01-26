@@ -141,7 +141,7 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
 
 // Render Systems
 
-const USE_PTX: bool = false;
+const USE_PTX: bool = true;
 
 fn setup_cuda(world: &mut World) {
     let compression = RenderConeCompression::default();
