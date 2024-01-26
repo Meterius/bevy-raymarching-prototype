@@ -129,11 +129,11 @@ pub fn setup_scene(
     commands.spawn((
         PbrBundle {
             transform: Transform::from_xyz(7.5, 5.0, 0.0),
-            mesh: assets.load("models/two-triangles.obj"),
+            mesh: assets.load("models/monkey.obj"),
             material: materials.add(Color::rgb_u8(124, 144, 255).into()),
             ..default()
         },
-        SdPrimitive::Mesh(assets.load("models/two-triangles.obj")),
+        SdPrimitive::Mesh(assets.load("models/monkey.obj")),
         SdVisual { enabled: true },
         TogglableVisual::default(),
     ));

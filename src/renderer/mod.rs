@@ -17,9 +17,9 @@ use std::sync::Arc;
 
 const MAX_COMPOSITION_NODE_COUNT: usize = 160000;
 
-const MAX_VERTEX_COUNT: usize = 1024;
-const MAX_TRIANGLE_COUNT: usize = 1024;
-const MAX_MESH_COUNT: usize = 1024;
+const MAX_VERTEX_COUNT: usize = 65536;
+const MAX_TRIANGLE_COUNT: usize = 65536;
+const MAX_MESH_COUNT: usize = 65536;
 
 const RENDER_TEXTURE_SIZE: (usize, usize) = (2560, 1440);
 
