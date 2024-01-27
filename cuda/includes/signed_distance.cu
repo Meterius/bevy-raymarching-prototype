@@ -196,7 +196,7 @@ __device__ float sd_composition(
             );
         }
 
-        if (bound_distance > cd + 0.1f) {
+        if (bound_distance > cd) {
             // early-bounding box return
             sd = bound_distance;
 
@@ -208,8 +208,6 @@ __device__ float sd_composition(
             vec3 center = 0.5f * (from_array(node.bound_min) + from_array(node.bound_max));
 
             auto appendix = &reinterpret_cast<SdCompositionPrimitiveAppendix *>(geometry.compositions)[index + 1];
-            auto appendix_triangle = &reinterpret_cast<SdCompositionPrimitiveTriangleAppendix *>(geometry.compositions)[
-                index + 1];
 
             quat rot = from_quat_array(appendix->rotation);
             vec3 scale = from_array(appendix->scale);
@@ -222,30 +220,13 @@ __device__ float sd_composition(
                     sd = MAX_POSITIVE_F32;
                     break;
 
-//                case SdPrimitiveVariant::Sphere:
-//                    sd = sd_unit_sphere(primitive_position / scale) * minimum(scale);
-//                    break;
-
-                case SdPrimitiveVariant::Triangle:
-                    sd = sd_triangle(
-                        position,
-                        vec3(
-                            appendix_triangle->bb_v0 & 1 ? node.bound_max[0] : node.bound_min[0],
-                            appendix_triangle->bb_v0 & 2 ? node.bound_max[1] : node.bound_min[1],
-                            appendix_triangle->v0_z
-                        ),
-                        from_array(appendix_triangle->v1),
-                        from_array(appendix_triangle->v2)
-                    );
+                case SdPrimitiveVariant::Sphere:
+                    sd = sd_unit_sphere(primitive_position / scale) * minimum(scale);
                     break;
 
-//                case SdPrimitiveVariant::Cube:
-//                    sd = sd_box(primitive_position, vec3(0.0f), scale);
-//                    break;
-//
-//                case SdPrimitiveVariant::Mandelbulb:
-//                    sd = sd_unit_mandelbulb(primitive_position / scale) * minimum(scale);
-//                    break;
+                case SdPrimitiveVariant::Cube:
+                    sd = sd_box(primitive_position, vec3(0.0f), scale);
+                    break;
             }
 
             index = node.parent;
@@ -257,13 +238,13 @@ __device__ float sd_composition(
             if (returning && second_child.get(stack_index)) {
                 // returning from second child
                 switch (node.variant) {
-//                    case SdCompositionVariant::Difference:
-//                        sd = max(stack_node->sd, -sd);
-//                        break;
+                    case SdCompositionVariant::Difference:
+                        sd = max(stack_node->sd, -sd);
+                        break;
 
-//                    case SdCompositionVariant::Intersect:
-//                        sd = max(stack_node->sd, sd);
-//                        break;
+                    case SdCompositionVariant::Intersect:
+                        sd = max(stack_node->sd, sd);
+                        break;
 
                     default:
                     case SdCompositionVariant::Mirror:
@@ -280,19 +261,19 @@ __device__ float sd_composition(
                     case SdCompositionVariant::Difference:
                         break;
 
-//                    case SdCompositionVariant::Mirror: {
-//                        auto appendix = &reinterpret_cast<SdCompositionMirrorAppendix *>(
-//                            geometry.compositions
-//                        )[index + 1];
-//
-//                        vec3 dir = from_array(appendix->direction);
-//
-//                        position = pos_mirrored.get(stack_index)
-//                                   ? position - 2.0f * dot(position - from_array(appendix->translation), dir) *
-//                                                dir
-//                                   : position;
-//                        break;
-//                    };
+                    case SdCompositionVariant::Mirror: {
+                        auto appendix = &reinterpret_cast<SdCompositionMirrorAppendix *>(
+                            geometry.compositions
+                        )[index + 1];
+
+                        vec3 dir = from_array(appendix->direction);
+
+                        position = pos_mirrored.get(stack_index)
+                                   ? position - 2.0f * dot(position - from_array(appendix->translation), dir) *
+                                                dir
+                                   : position;
+                        break;
+                    };
                 }
 
                 index = node.parent;
@@ -310,19 +291,19 @@ __device__ float sd_composition(
                         case SdCompositionVariant::Difference:
                             break;
 
-//                        case SdCompositionVariant::Mirror: {
-//                            auto appendix = &reinterpret_cast<SdCompositionMirrorAppendix *>(
-//                                geometry.compositions
-//                            )[index + 1];
-//
-//                            vec3 dir = from_array(appendix->direction);
-//                            float diff = dot(p - from_array(appendix->translation), dir);
-//
-//                            pos_mirrored.set(stack_index, diff < 0.0f);
-//                            position =
-//                                diff < 0.0f ? position - 2.0f * diff * dir : position;
-//                            break;
-//                        }
+                        case SdCompositionVariant::Mirror: {
+                            auto appendix = &reinterpret_cast<SdCompositionMirrorAppendix *>(
+                                geometry.compositions
+                            )[index + 1];
+
+                            vec3 dir = from_array(appendix->direction);
+                            float diff = dot(p - from_array(appendix->translation), dir);
+
+                            pos_mirrored.set(stack_index, diff < 0.0f);
+                            position =
+                                diff < 0.0f ? position - 2.0f * diff * dir : position;
+                            break;
+                        }
                     }
                 } else {
                     // when returning from the first child update the stack sd using the returned sd,

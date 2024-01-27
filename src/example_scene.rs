@@ -2,6 +2,7 @@ use crate::renderer::scene::{SdComposition, SdCompositionNodeVariant, SdPrimitiv
 use crate::renderer::RenderCameraTarget;
 use bevy::prelude::*;
 use bevy_flycam::FlyCam;
+use num_traits::pow::Pow;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
@@ -16,6 +17,96 @@ pub fn setup_scene(
 ) {
     let mut ss_random = StdRng::seed_from_u64(0);
 
+    let mut spawn_pillar = |mut commands: &mut ChildBuilder| {
+        commands
+            .spawn((
+                SpatialBundle {
+                    transform: Transform::from_xyz(0.0, 0.125, 0.0),
+                    ..default()
+                },
+                SdVisual::default(),
+                SdPrimitive::Box(Vec3::new(0.5, 0.25, 0.5)),
+            ))
+            .id();
+
+        let base = commands
+            .spawn((
+                SpatialBundle {
+                    transform: Transform::from_xyz(0.0, 1.0, 0.0),
+                    ..default()
+                },
+                SdPrimitive::Box(Vec3::new(0.25, 2.0, 0.25)),
+            ))
+            .id();
+
+        let base_sphere = commands
+            .spawn((
+                SpatialBundle {
+                    transform: Transform::from_xyz(0.0, 1.25, 0.0),
+                    ..default()
+                },
+                SdPrimitive::Sphere(0.5),
+            ))
+            .id();
+
+        commands.spawn((
+            SpatialBundle::default(),
+            SdComposition::Difference(vec![base, base_sphere]),
+            SdVisual { enabled: true },
+        ));
+
+        commands.spawn((
+            SpatialBundle {
+                transform: Transform::from_xyz(0.0, 2.0 - 0.1, 0.0),
+                ..default()
+            },
+            SdPrimitive::Box(Vec3::new(0.5, 0.1, 0.5)),
+            SdVisual { enabled: true },
+        ));
+
+        for dx in 0..=1 {
+            for dy in 0..=1 {
+                commands.spawn((
+                    SpatialBundle {
+                        transform: Transform::from_xyz(
+                            0.25 * dx as f32 - 0.125,
+                            0.375,
+                            0.25 * dy as f32 - 0.125,
+                        ),
+                        ..default()
+                    },
+                    SdPrimitive::Box(Vec3::new(0.1, 0.25, 0.1)),
+                    SdVisual { enabled: true },
+                ));
+            }
+        }
+    };
+
+    let mut spawn_pillar_at = |pos: Vec3, scale: Vec3| {
+        commands
+            .spawn((SpatialBundle {
+                transform: Transform {
+                    translation: pos + Vec3::new(0.0, 0.5, 0.0) * (1.0 - scale),
+                    scale,
+                    ..default()
+                },
+                ..default()
+            },))
+            .with_children(|child| {
+                spawn_pillar(child);
+            });
+    };
+
+    for i in 0..50 {
+        for j in 0..50 {
+            spawn_pillar_at(
+                Vec3::new(4.0 * (i as f32).powf(1.1), 0.0, 4.0 * (j as f32).pow(1.1)),
+                Vec3::ONE * (1.0 + 0.1 * i as f32 + 0.1 * j as f32),
+            );
+        }
+    }
+
+    /*
     let mut example_offset = 0.0;
     let mut spawn_example = |variant: SdCompositionNodeVariant| {
         let child1 = commands
@@ -238,6 +329,7 @@ pub fn setup_scene(
         ));
     }
 
+     */
     /*    // light
     commands.spawn(PointLightBundle {
         point_light: PointLight {
@@ -256,8 +348,8 @@ pub fn setup_scene(
                 is_active: false,
                 ..default()
             },
-            transform: Transform::from_xyz(5.0, 7.0, -5.0)
-                .looking_at(Vec3::new(25.0, 2.0, 25.0), Vec3::Y),
+            transform: Transform::from_xyz(5.0, 2.0, -5.0)
+                .looking_at(Vec3::new(0.0, 2.0, 0.0), Vec3::Y),
             ..default()
         },
         FlyCam,

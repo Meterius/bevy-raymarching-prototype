@@ -752,6 +752,14 @@ fn convert_node_to_native(
         ..default()
     };
 
+    native_entry.set_variant(match &node.variant {
+        SdCompositionNodeVariant::Primitive(_) => cuda::SdCompositionVariant_Union,
+        SdCompositionNodeVariant::Union => cuda::SdCompositionVariant_Union,
+        SdCompositionNodeVariant::Difference => cuda::SdCompositionVariant_Difference,
+        SdCompositionNodeVariant::Intersect => cuda::SdCompositionVariant_Intersect,
+        SdCompositionNodeVariant::Mirror(_, _) => cuda::SdCompositionVariant_Mirror,
+    });
+
     native_entry.set_primitive_variant(match &node.variant {
         SdCompositionNodeVariant::Primitive(primitive) => match primitive.variant {
             SdPrimitiveNodeVariant::Empty => cuda::SdPrimitiveVariant_Empty,
