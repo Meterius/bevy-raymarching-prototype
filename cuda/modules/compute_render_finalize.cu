@@ -89,13 +89,16 @@ extern "C" __global__ void compute_render_finalize(
     } else if (texture_value.outcome == DepthLimit) {
         color = vec3(vec3(0.2f, 0.4f, 1.0f) * 3.0f * 0.0f + texture_value.steps * 0.01f);
         color = vec3(0.0f) + 1.0f * powered_step_fac * float(globals.use_step_glow_on_background);
+    } else {
+        color = vec3(1.0f, 0.0f, 0.0f);
     }
 
     color = hdr_map_aces_tone(max(color, 0.0f));
-
-    if (texture_value.steps > 5000.0f) {
-        color = vec3(1.0, 0.0, 0.0);
-    }
+//    color = vec3(clamp(texture_value.steps * 0.01f, 0.0f, 1.0f));
+//    color.x = texture_value.steps > 300.0f ? 1.0f : 0.0f;
+//    color.y = 0.0f;
+//    color.z = 0.0f;
+//    color = vec3(clamp((float) texture_value.steps / (float) RAY_MARCH_STEP_LIMIT, 0.0f, 1.0f));
 
     unsigned int rgba = ((unsigned int) (255.0f * color.x) & 0xff) |
                         (((unsigned int) (255.0f * color.y) & 0xff) << 8) |

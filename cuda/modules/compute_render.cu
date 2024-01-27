@@ -94,7 +94,7 @@ extern "C" __global__ void compute_render(
 
     render_data_texture.texture[texture_index] = {
         ray_render.hit.depth,
-        (float) ray_render.hit.steps + entry.steps,
+        (float) composition_traversal_count[threadIdx.x],
         ray_render.hit.outcome,
         { ray_render.color.x, ray_render.color.y, ray_render.color.z },
         ray_render.light
