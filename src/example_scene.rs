@@ -349,7 +349,7 @@ pub fn setup_scene(
                 ..default()
             },
             transform: Transform::from_xyz(5.0, 2.0, -5.0)
-                .looking_at(Vec3::new(0.0, 2.0, 0.0), Vec3::Y),
+                .looking_at(Vec3::new(35.0, 2.0, 35.0), Vec3::Y),
             ..default()
         },
         FlyCam,

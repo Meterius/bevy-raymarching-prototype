@@ -11,7 +11,9 @@ add_executable(
     cuda/includes/signed_distance.cu
     cuda/includes/rendering.cu
     cuda/includes/ray_marching.cu
-    cuda/modules/main.cu
+        cuda/modules/compute_render.cu
+        cuda/modules/compute_compressed_depth.cu
+        cuda/modules/compute_render_finalize.cu
         cuda/includes/types.cu
 )
 

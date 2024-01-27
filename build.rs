@@ -1,7 +1,6 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use std::fs::File;
-use std::path::PathBuf;
 use syn::{parse_file, Attribute, Item, Meta};
 
 // Utility
@@ -72,31 +71,32 @@ fn compile_cuda() {
     println!("cargo:rerun-if-changed={}", "cuda");
 
     // build the cuda modules
-    let cuda_src = PathBuf::from("cuda/modules/main.cu");
-    let ptx_file = "assets/cuda/compiled/main.ptx";
-
-    let cubin_file = "assets/cuda/compiled/main.cubin";
-    let reg_limited_cubin_file = "assets/cuda/compiled/main_regl.cubin";
 
     let mut path = std::env::var("PATH").unwrap();
     path.push_str(";C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.38.33130\\bin\\Hostx64\\x64;");
 
-    let make_nvcc = |out_file: &str| {
-        let file = File::create(format!("logs/nvcc_{}.txt", out_file.replace("/", "_"))).unwrap();
+    for func in vec![
+        "compute_render",
+        "compute_render_finalize",
+        "compute_compressed_depth",
+    ]
+    .into_iter()
+    {
+        let filename = format!("assets/cuda/compiled/{func}.ptx");
+        let file = File::create(format!("logs/nvcc_{}.txt", filename.replace("/", "_"))).unwrap();
 
         let mut nvcc_cmd = Command::new("nvcc");
 
         nvcc_cmd
             .env("PATH", path.as_str())
             .arg("-o")
-            .arg(out_file)
-            .arg(&cuda_src)
+            .arg(filename)
+            .arg(format!("cuda/modules/{func}.cu"))
             .stderr(file.try_clone().unwrap())
             .stdout(file.try_clone().unwrap());
 
         if cfg!(debug_assertions) {
             nvcc_cmd.arg("-lineinfo");
-            // nvcc_cmd.arg("-G");
             nvcc_cmd.arg("--use_fast_math");
             nvcc_cmd.arg("-Xptxas=\"-v\"");
             nvcc_cmd.arg("-Xptxas=\"-o=3\"");
@@ -109,38 +109,16 @@ fn compile_cuda() {
 
         println!("{nvcc_cmd:?}");
 
-        nvcc_cmd
-    };
-
-    let nvcc_status = make_nvcc(ptx_file)
-        .arg(format!("-arch={}", "compute_86"))
-        .arg(format!("-code={}", "sm_86"))
-        .arg("-ptx")
-        .status()
-        .unwrap();
-    assert!(
-        nvcc_status.success(),
-        "Failed to compile CUDA source to PTX."
-    );
-
-    for reg_compressed in vec![false, true].into_iter() {
-        let mut nvcc_status = make_nvcc(if reg_compressed {
-            reg_limited_cubin_file
-        } else {
-            cubin_file
-        });
-
-        nvcc_status.arg(format!("-arch={}", "native")).arg("-cubin");
-
-        if reg_compressed {
-            nvcc_status.arg("--maxrregcount=48");
-        }
-
-        let nvcc_status = nvcc_status.status().unwrap();
+        let nvcc_status = nvcc_cmd
+            .arg(format!("-arch={}", "compute_86"))
+            .arg(format!("-code={}", "sm_86"))
+            .arg("-ptx")
+            .status()
+            .unwrap();
 
         assert!(
             nvcc_status.success(),
-            "Failed to compile CUDA source to CUBIN."
+            "Failed to compile CUDA source to PTX."
         );
     }
 

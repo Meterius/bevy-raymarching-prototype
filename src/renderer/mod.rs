@@ -162,8 +162,6 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
 
 // Render Systems
 
-const USE_PTX: bool = true;
-
 fn setup_cuda(world: &mut World) {
     let compression = RenderConeCompression::default();
 
@@ -177,70 +175,52 @@ fn setup_cuda(world: &mut World) {
 
     let start = std::time::Instant::now();
 
-    let func_compute_compressed_depth: CustomCudaFunction;
-    let func_compute_render: CustomCudaFunction;
-    let func_compute_render_finalize: CustomCudaFunction;
-    if USE_PTX {
-        let ptx = Ptx::from_src(include_str!("../../assets/cuda/compiled/main.ptx"));
+    device
+        .load_ptx(
+            Ptx::from_src(include_str!(
+                "../../assets/cuda/compiled/compute_compressed_depth.ptx"
+            )),
+            "compute_compressed_depth",
+            &["compute_compressed_depth"],
+        )
+        .unwrap();
+
+    device
+        .load_ptx(
+            Ptx::from_src(include_str!(
+                "../../assets/cuda/compiled/compute_render.ptx"
+            )),
+            "compute_render",
+            &["compute_render"],
+        )
+        .unwrap();
+
+    device
+        .load_ptx(
+            Ptx::from_src(include_str!(
+                "../../assets/cuda/compiled/compute_render_finalize.ptx"
+            )),
+            "compute_render_finalize",
+            &["compute_render_finalize"],
+        )
+        .unwrap();
+
+    let func_compute_compressed_depth = CustomCudaFunction::from_safe(
         device
-            .load_ptx(
-                ptx,
-                "main",
-                &[
-                    "compute_compressed_depth",
-                    "compute_render",
-                    "compute_render_finalize",
-                ],
-            )
-            .unwrap();
-
-        func_compute_compressed_depth = CustomCudaFunction::from_safe(
-            device.get_func("main", "compute_compressed_depth").unwrap(),
-            device.clone(),
-        );
-        func_compute_render = CustomCudaFunction::from_safe(
-            device.get_func("main", "compute_render").unwrap(),
-            device.clone(),
-        );
-        func_compute_render_finalize = CustomCudaFunction::from_safe(
-            device.get_func("main", "compute_render_finalize").unwrap(),
-            device.clone(),
-        );
-    } else {
-        let module = unsafe {
-            let src = include_bytes!("../../assets/cuda/compiled/main.cubin");
-            cudarc::driver::result::module::load_data(src.as_ptr() as *const _).unwrap()
-        };
-
-        let regl_module = unsafe {
-            let src = include_bytes!("../../assets/cuda/compiled/main_regl.cubin");
-            cudarc::driver::result::module::load_data(src.as_ptr() as *const _).unwrap()
-        };
-
-        func_compute_compressed_depth = unsafe {
-            let name = CString::new("compute_compressed_depth").unwrap();
-            CustomCudaFunction::from_sys(
-                cudarc::driver::result::module::get_function(module.clone(), name).unwrap(),
-                device.clone(),
-            )
-        };
-
-        func_compute_render = unsafe {
-            let name = CString::new("compute_render").unwrap();
-            CustomCudaFunction::from_sys(
-                cudarc::driver::result::module::get_function(regl_module.clone(), name).unwrap(),
-                device.clone(),
-            )
-        };
-
-        func_compute_render_finalize = unsafe {
-            let name = CString::new("compute_render_finalize").unwrap();
-            CustomCudaFunction::from_sys(
-                cudarc::driver::result::module::get_function(module.clone(), name).unwrap(),
-                device.clone(),
-            )
-        };
-    }
+            .get_func("compute_compressed_depth", "compute_compressed_depth")
+            .unwrap(),
+        device.clone(),
+    );
+    let func_compute_render = CustomCudaFunction::from_safe(
+        device.get_func("compute_render", "compute_render").unwrap(),
+        device.clone(),
+    );
+    let func_compute_render_finalize = CustomCudaFunction::from_safe(
+        device
+            .get_func("compute_render_finalize", "compute_render_finalize")
+            .unwrap(),
+        device.clone(),
+    );
 
     info!("CUDA PTX Loading took {:.2?} seconds", start.elapsed());
 
