@@ -197,7 +197,7 @@ __device__ float sd_composition(
             );
         }
 
-        if (bound_distance > cd) {
+        if (bound_distance > cd + 0.1f) {
             // early-bounding box return
             sd = bound_distance;
 

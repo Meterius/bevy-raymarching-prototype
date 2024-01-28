@@ -75,8 +75,8 @@ impl Plugin for RenderScenePlugin {
             .insert_resource(RenderSceneStoredGeometry::default())
             .insert_resource(RenderSceneSettings {
                 enable_debug_gizmos: false,
-                enable_step_glow_on_background: false,
-                enable_step_glow_on_foreground: false,
+                enable_step_glow_on_background: true,
+                enable_step_glow_on_foreground: true,
             })
             .add_systems(PostUpdate, (compile_scene_geometry,));
     }

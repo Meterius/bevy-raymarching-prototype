@@ -46,7 +46,6 @@ extern "C" __global__ void compute_render(
 
     // if enabled, fetch cone march compression starting point
 
-#ifndef DISABLE_CONE_MARCH
     ConeMarchTextureValue entry = { 0.0f, 0, Collision };
 
     if (compression_enabled) {
@@ -71,10 +70,6 @@ extern "C" __global__ void compute_render(
             );
         }
     }
-#else
-    float interpolated_cm_steps = 0.0f;
-    ConeMarchTextureValue entry = {0.0f, 0, Collision};
-#endif
 
     float cone_radius_at_unit = get_pixel_cone_radius(
         texture_coord, camera, render_data_texture,

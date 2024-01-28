@@ -75,8 +75,8 @@ extern "C" __global__ void compute_render_finalize(
 
     vec3 color;
 
-    float geo_step_fac = texture_value.steps / (RAY_MARCH_STEP_LIMIT * 0.1f);
-    float step_fac = texture_value.steps / (RAY_MARCH_STEP_LIMIT * 0.5f);
+    float geo_step_fac = texture_value.steps / (RAY_MARCH_STEP_LIMIT * 0.025f);
+    float step_fac = texture_value.steps / (RAY_MARCH_STEP_LIMIT * 0.01f);
     float geo_powered_step_fac = pow(geo_step_fac, 3.0f);
     float powered_step_fac = pow(step_fac, 3.0f);
 
@@ -86,11 +86,13 @@ extern "C" __global__ void compute_render_finalize(
                 vec3(texture_value.depth * 0.00001f);
         // color = from_array(texture_value.color);
         // color = vec3(texture_value.depth * 0.00005f);
+//        color = vec3(0.0f, 0.0f, 1.0f);
     } else if (texture_value.outcome == DepthLimit) {
         color = vec3(vec3(0.2f, 0.4f, 1.0f) * 3.0f * 0.0f + texture_value.steps * 0.01f);
         color = vec3(0.0f) + 1.0f * powered_step_fac * float(globals.use_step_glow_on_background);
     } else {
         color = vec3(1.0f, 0.0f, 0.0f);
+        color = vec3(0.0f, 1.0f, 0.0f);
     }
 
     color = hdr_map_aces_tone(max(color, 0.0f));
