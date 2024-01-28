@@ -97,20 +97,14 @@ pub fn setup_scene(
             });
     };
 
-    for i in 0..32 {
-        for j in 0..32 {
+    for i in 0..50 {
+        for j in 0..50 {
             spawn_pillar_at(
                 Vec3::new(4.0 * (i as f32).powf(1.1), 0.0, 4.0 * (j as f32).pow(1.1)),
                 Vec3::ONE * (1.0 + 0.1 * i as f32 + 0.1 * j as f32),
             );
         }
     }
-
-    // commands.spawn((
-    //     SpatialBundle::default(),
-    //     SdVisual::default(),
-    //     SdPrimitive::Box(Vec3::new(10.0, 10.0, 0.1)),
-    // ));
 
     /*
     let mut example_offset = 0.0;

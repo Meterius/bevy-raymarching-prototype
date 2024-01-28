@@ -419,7 +419,7 @@ dependencies = [
  "itertools",
  "naga 0.14.2",
  "naga_oil 0.11.0",
-    "num-traits",
+ "num-traits",
  "nvtx",
  "proc-macro2",
  "quote",

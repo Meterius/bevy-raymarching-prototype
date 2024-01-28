@@ -154,7 +154,7 @@ __device__ float sd_mesh(const vec3 p, const unsigned int mesh_id, const SdRunti
     return sd;
 }
 
-__shared__ float composition_traversal_count[BLOCK_SIZE];
+__shared__ unsigned int composition_traversal_count[BLOCK_SIZE];
 
 __device__ float sd_composition(
     const vec3 p,
@@ -172,8 +172,6 @@ __device__ float sd_composition(
     BitSet<32> pos_mirrored {};
 
     RuntimeStackNode sd_runtime_stack[SD_RUNTIME_STACK_MAX_DEPTH];
-
-    // composition_traversal_count[threadIdx.x] += 1;
 
     vec3 position = p;
 
@@ -197,7 +195,7 @@ __device__ float sd_composition(
             );
         }
 
-        if (bound_distance > cd + 0.1f) {
+        if (bound_distance > cd) {
             // early-bounding box return
             sd = bound_distance;
 

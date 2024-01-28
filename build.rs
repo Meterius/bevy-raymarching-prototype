@@ -82,51 +82,44 @@ fn compile_cuda() {
     ]
     .into_iter()
     {
-        for use_cubin in vec![false, true].into_iter() {
-            let filename = format!(
-                "assets/cuda/compiled/{func}.{}",
-                if use_cubin { "cubin" } else { "ptx" }
-            );
-            let file =
-                File::create(format!("logs/nvcc_{}.txt", filename.replace("/", "_"))).unwrap();
+        let filename = format!("assets/cuda/compiled/{func}.ptx");
+        let file = File::create(format!("logs/nvcc_{}.txt", filename.replace("/", "_"))).unwrap();
 
-            let mut nvcc_cmd = Command::new("nvcc");
+        let mut nvcc_cmd = Command::new("nvcc");
 
-            nvcc_cmd
-                .env("PATH", path.as_str())
-                .arg("-o")
-                .arg(filename)
-                .arg(format!("cuda/modules/{func}.cu"))
-                .stderr(file.try_clone().unwrap())
-                .stdout(file.try_clone().unwrap());
+        nvcc_cmd
+            .env("PATH", path.as_str())
+            .arg("-o")
+            .arg(filename)
+            .arg(format!("cuda/modules/{func}.cu"))
+            .stderr(file.try_clone().unwrap())
+            .stdout(file.try_clone().unwrap());
 
-            if cfg!(debug_assertions) {
-                nvcc_cmd.arg("-lineinfo");
-                nvcc_cmd.arg("--use_fast_math");
-                nvcc_cmd.arg("-Xptxas=\"-v\"");
-                nvcc_cmd.arg("-Xptxas=\"-o=3\"");
-                nvcc_cmd.arg("-Xptxas=\"-warn-double-usage\"");
-            } else {
-                nvcc_cmd.arg("--use_fast_math");
-                nvcc_cmd.arg("-Xptxas=\"-o=3\"");
-                nvcc_cmd.arg("-Xptxas=\"-warn-double-usage\"");
-                nvcc_cmd.arg("-Xptxas=\"-Werror\"");
-            }
-
-            println!("{nvcc_cmd:?}");
-
-            let nvcc_status = nvcc_cmd
-                .arg(format!("-arch={}", "compute_86"))
-                .arg(format!("-code={}", "sm_86"))
-                .arg(if use_cubin { "-cubin" } else { "-ptx" })
-                .status()
-                .unwrap();
-
-            assert!(
-                nvcc_status.success(),
-                "Failed to compile CUDA source to PTX."
-            );
+        if cfg!(debug_assertions) {
+            nvcc_cmd.arg("-lineinfo");
+            nvcc_cmd.arg("--use_fast_math");
+            nvcc_cmd.arg("-Xptxas=\"-v\"");
+            nvcc_cmd.arg("-Xptxas=\"-o=3\"");
+            nvcc_cmd.arg("-Xptxas=\"-warn-double-usage\"");
+        } else {
+            nvcc_cmd.arg("--use_fast_math");
+            nvcc_cmd.arg("-Xptxas=\"-o=3\"");
+            nvcc_cmd.arg("-Xptxas=\"-warn-double-usage\"");
         }
+
+        println!("{nvcc_cmd:?}");
+
+        let nvcc_status = nvcc_cmd
+            .arg(format!("-arch={}", "compute_86"))
+            .arg(format!("-code={}", "sm_86"))
+            .arg("-ptx")
+            .status()
+            .unwrap();
+
+        assert!(
+            nvcc_status.success(),
+            "Failed to compile CUDA source to PTX."
+        );
     }
 
     // The bindgen::Builder is the main entry point
