@@ -78,10 +78,8 @@ extern "C" __global__ void compute_compressed_depth(
         }
     }
 
-    auto sds = make_sds_scene(globals, camera);
-    RenderSurfaceData surface {};
-    RayMarchHit hit = ray_march<true>(
-        [&surface, &sds](vec3 p, float cd) { return sds(p, cd, surface); },
+    RayMarchHit hit = ray_march(
+        make_sdi_scene<SdInvocationType::ConeType>(globals, camera),
         ray,
         entry,
         cone_radius_at_unit

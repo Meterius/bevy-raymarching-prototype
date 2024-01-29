@@ -92,52 +92,10 @@ __device__ vec3 camera_to_ray(
 
 __device__ SdRuntimeScene runtime_scene;
 
-__device__ auto make_sds_scene(const GlobalsBuffer &globals, const CameraBuffer &camera) {
-    auto box_sds = make_generic_sds(
-        [](vec3 p, float cd) {
-            return sd_box(p, vec3(-15.0f, 1.0f, 0.0f), vec3(1.0f, 2.0f, 10.0f));
-        },
-        RenderSurfaceData { vec3(1.0f, 0.0f, 0.0f) }
-    );
-
-    auto runtime_scene_sds = make_generic_sds(
-        [](vec3 p, float cd) {
-            return sd_composition(p, cd, runtime_scene.geometry, 0);
-        },
-        RenderSurfaceData { vec3(0.4f, 0.5f, 0.2f) }
-    );
-
-    auto plane_scene_sds = make_generic_sds(
-        [](vec3 p, float cd) {
-            return sd_box(p, vec3(0.0f, -0.5f, 0.0f), vec3(50.0f, 1.0f, 50.0f));
-        },
-        RenderSurfaceData { vec3(0.3f, 0.4f, 0.2f) }
-    );
-
-    auto axes_scene_sds = make_generic_location_dependent_sds(
-        [](vec3 p, float cd) { return sd_axes(p); },
-        [](vec3 p, float cd) {
-            vec3 color;
-            color.x = (p.x > 0.25 ? 1.0f : (p.x < 0.25 ? 0.5f : 0.0f));
-            color.y = (p.y > 0.25 ? 1.0f : (p.y < 0.25 ? 0.5f : 0.0f));
-            color.z = (p.z > 0.25 ? 1.0f : (p.z < 0.25 ? 0.5f : 0.0f));
-            return RenderSurfaceData { color };
-        }
-    );
-
-    auto mandelbulb_scene_sds = make_generic_sds(
-        [&](vec3 p, float cd) {
-            const float scale = 100.0f;
-            p /= scale;
-            p.z = wrap(p.z, -1.0f, 1.0f);
-            p.x -= 1.0f;
-            return sd_mandelbulb(p, globals.time) * scale;
-        },
-        RenderSurfaceData { vec3(1.5f, 0.1f, 1.9f) }
-    );
-
-    return [=](vec3 p, float cd, RenderSurfaceData &surface_output) {
-        return runtime_scene_sds(p, cd, surface_output);
+template<SdInvocationType type>
+__device__ auto make_sdi_scene(const GlobalsBuffer &globals, const CameraBuffer &camera) {
+    return [=](SdInvocation<type> inv) {
+        return sdi_composition(inv, runtime_scene.geometry, 0);
     };
 }
 

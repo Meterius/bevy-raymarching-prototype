@@ -3,9 +3,6 @@
 #include "../includes/libraries/glm/glm.hpp"
 #include "../includes/types.cu"
 #include "../includes/utils.cu"
-#include "../includes/ray_marching.cu"
-#include "../includes/libraries/glm/gtx/quaternion.hpp"
-#include <assert.h>
 
 using namespace glm;
 
@@ -21,6 +18,51 @@ __device__ vec3 wrap(const vec3 p, const vec3 lower, const vec3 higher) {
         wrap(p.z, lower.z, higher.z)
     };
 }
+
+enum SdInvocationType {
+    ConeType,
+    RayType,
+    PointType,
+    SurfaceType,
+};
+
+template<SdInvocationType type>
+struct SdInvocation {
+};
+
+template<>
+struct SdInvocation<SdInvocationType::ConeType> {
+    Ray ray;
+    float radius;
+};
+
+template<>
+struct SdInvocation<SdInvocationType::RayType> {
+    Ray ray;
+};
+
+template<>
+struct SdInvocation<SdInvocationType::PointType> {
+    Ray ray;
+    float radius;
+};
+
+__device__ SdInvocation<SdInvocationType::PointType> adjust_point_invocation(
+    const SdInvocation<SdInvocationType::PointType> inv,
+    const vec3 offset,
+    const float min_radius
+) {
+    return SdInvocation<SdInvocationType::PointType> {
+        Ray { inv.ray.position + offset, inv.ray.direction },
+        max(inv.radius, min_radius)
+    };
+}
+
+template<>
+struct SdInvocation<SdInvocationType::SurfaceType> {
+    Ray ray;
+    RenderSurfaceData &surface;
+};
 
 // fractals
 
@@ -91,6 +133,46 @@ __device__ float sd_unit_cube(const vec3 p) {
     return sd_box(p, vec3(0.0f), vec3(1.0f));
 }
 
+bool inside_aabb(const vec3 p, const vec3 bb_min, const vec3 bb_max) {
+    return bb_min.x <= p.x && p.x <= bb_max.x && bb_min.y <= p.y && p.y <= bb_max.y && bb_min.z <= p.z &&
+           p.z <= bb_max.z;
+}
+
+float ray_distance_to_bb(const Ray &ray, const vec3 &bb_min, const vec3 &bb_max) {
+    if (inside_aabb(ray.position, bb_min, bb_max)) {
+        return 0.0f;
+    }
+
+    float tmin = std::numeric_limits<float>::lowest();
+    float tmax = std::numeric_limits<float>::max();
+
+    for (int i = 0; i < 3; ++i) {
+        if (abs(ray.direction[i]) < std::numeric_limits<float>::epsilon()) {
+            // Ray is parallel to the slab. No hit if origin not within slab
+            if (ray.position[i] < bb_min[i] || ray.position[i] > bb_max[i])
+                return std::numeric_limits<float>::max();
+        } else {
+            // Compute intersection t value of ray with near and far plane of slab
+            float ood = 1.0f / ray.direction[i];
+            float t1 = (bb_min[i] - ray.position[i]) * ood;
+            float t2 = (bb_max[i] - ray.position[i]) * ood;
+
+            // Make t1 be intersection with near plane, t2 with far plane
+            if (t1 > t2) std::swap(t1, t2);
+
+            // Compute the intersection of slab intersection intervals
+            tmin = max(tmin, t1);
+            tmax = min(tmax, t2);
+
+            // Exit with no collision as soon as slab intersection becomes empty
+            if (tmin > tmax) return std::numeric_limits<float>::max();
+        }
+    }
+
+    // Ray intersects all 3 slabs. Return distance to first hit
+    return tmin > 0 ? tmin : tmax;
+}
+
 //
 
 __device__ float sd_axes(const vec3 p) {
@@ -156,9 +238,33 @@ __device__ float sd_mesh(const vec3 p, const unsigned int mesh_id, const SdRunti
 
 __shared__ unsigned int composition_traversal_count[BLOCK_SIZE];
 
-__device__ float sd_composition(
-    const vec3 p,
-    const float cd,
+template<SdInvocationType type>
+__device__ bool sdi_composition_should_use_bounding_box_termination(
+    const float bb_dist,
+    const SdInvocation<type> &inv
+) {
+    return bb_dist >= 0.1f;
+}
+
+template<>
+__device__ bool sdi_composition_should_use_bounding_box_termination<SdInvocationType::PointType>(
+    const float bb_dist,
+    const SdInvocation<SdInvocationType::PointType> &inv
+) {
+    return bb_dist >= 0.1f + inv.radius;
+}
+
+template<>
+__device__ bool sdi_composition_should_use_bounding_box_termination<SdInvocationType::ConeType>(
+    const float bb_dist,
+    const SdInvocation<SdInvocationType::ConeType> &inv
+) {
+    return bb_dist >= 0.1f + inv.radius;
+}
+
+template<SdInvocationType type>
+__device__ float sdi_composition(
+    const SdInvocation<type> inv,
     const SdRuntimeSceneGeometry geometry,
     const int composition_index
 ) {
@@ -173,7 +279,7 @@ __device__ float sd_composition(
 
     RuntimeStackNode sd_runtime_stack[SD_RUNTIME_STACK_MAX_DEPTH];
 
-    vec3 position = p;
+    vec3 position = inv.ray.position;
 
     sd_runtime_stack[stack_index] = { MAX_POSITIVE_F32 };
 
@@ -195,7 +301,7 @@ __device__ float sd_composition(
             );
         }
 
-        if (bound_distance > cd) {
+        if (sdi_composition_should_use_bounding_box_termination<type>(bound_distance, inv)) {
             // early-bounding box return
             sd = bound_distance;
 
@@ -295,7 +401,7 @@ __device__ float sd_composition(
                             )[index + 1];
 
                             vec3 dir = from_array(appendix->direction);
-                            float diff = dot(p - from_array(appendix->translation), dir);
+                            float diff = dot(position - from_array(appendix->translation), dir);
 
                             pos_mirrored.set(stack_index, diff < 0.0f);
                             position =
@@ -327,50 +433,28 @@ __device__ float sd_composition(
 
 // surface
 
-template<typename SFunc>
-__device__ auto make_generic_sds(const SFunc sd_func, const RenderSurfaceData surface) {
-    return [=](vec3 p, float cd, RenderSurfaceData &surface_output) {
-        float sd = sd_func(p, cd);
-        if (sd <= cd) {
-            surface_output.color = surface.color;
-        }
-        return sd;
-    };
-}
-
-template<typename SFunc, typename SurfFunc>
-__device__ auto make_generic_location_dependent_sds(
-    const SFunc sd_func,
-    const SurfFunc surface_func
-) {
-    return [surface_func, sd_func](vec3 p, float cd, RenderSurfaceData &surface_output) {
-        float sd = sd_func(p, cd);
-        if (sd <= cd) {
-            surface_output = surface_func(p, cd);
-        }
-        return sd;
-    };
-}
-
 #define NORMAL_EPSILON 0.001f
 #define NORMAL_EPSILON_CD (NORMAL_EPSILON * 4.0f)
 
 template<typename SFunc>
-__device__ vec3 sd_normal(const vec3 p, const SFunc sd_func) {
-    float dx = (-sd_func(vec3(p.x + 2.0f * NORMAL_EPSILON, p.y, p.z), NORMAL_EPSILON_CD) +
-                8.0f * sd_func(vec3(p.x + NORMAL_EPSILON, p.y, p.z), NORMAL_EPSILON_CD) -
-                8.0f * sd_func(vec3(p.x - NORMAL_EPSILON, p.y, p.z), NORMAL_EPSILON_CD) +
-                sd_func(vec3(p.x - 2.0f * NORMAL_EPSILON, p.y, p.z), NORMAL_EPSILON_CD));
+__device__ vec3 sdi_normal(
+    const SdInvocation<SdInvocationType::PointType> inv,
+    const SFunc sdi_func
+) {
+    float dx = (-sdi_func(adjust_point_invocation(inv, vec3(2.0f * NORMAL_EPSILON, 0.0f, 0.0f), NORMAL_EPSILON_CD)) +
+                8.0f * sdi_func(adjust_point_invocation(inv, vec3(NORMAL_EPSILON, 0.0f, 0.0f), NORMAL_EPSILON_CD)) -
+                8.0f * sdi_func(adjust_point_invocation(inv, vec3(-NORMAL_EPSILON, 0.0f, 0.0f), NORMAL_EPSILON_CD)) +
+                sdi_func(adjust_point_invocation(inv, vec3(-2.0f * NORMAL_EPSILON, 0.0f, 0.0f), NORMAL_EPSILON_CD)));
 
-    float dy = (-sd_func(vec3(p.x, p.y + 2.0f * NORMAL_EPSILON, p.z), NORMAL_EPSILON_CD) +
-                8.0f * sd_func(vec3(p.x, p.y + NORMAL_EPSILON, p.z), NORMAL_EPSILON_CD) -
-                8.0f * sd_func(vec3(p.x, p.y - NORMAL_EPSILON, p.z), NORMAL_EPSILON_CD) +
-                sd_func(vec3(p.x, p.y - 2.0f * NORMAL_EPSILON, p.z), NORMAL_EPSILON_CD));
+    float dy = (-sdi_func(adjust_point_invocation(inv, vec3(0.0f, 2.0f * NORMAL_EPSILON, 0.0f), NORMAL_EPSILON_CD)) +
+                8.0f * sdi_func(adjust_point_invocation(inv, vec3(0.0f, NORMAL_EPSILON, 0.0f), NORMAL_EPSILON_CD)) -
+                8.0f * sdi_func(adjust_point_invocation(inv, vec3(0.0f, -NORMAL_EPSILON, 0.0f), NORMAL_EPSILON_CD)) +
+                sdi_func(adjust_point_invocation(inv, vec3(0.0f, -2.0f * NORMAL_EPSILON, 0.0f), NORMAL_EPSILON_CD)));
 
-    float dz = (-sd_func(vec3(p.x, p.y, p.z + 2.0f * NORMAL_EPSILON), NORMAL_EPSILON_CD) +
-                8.0f * sd_func(vec3(p.x, p.y, p.z + NORMAL_EPSILON), NORMAL_EPSILON_CD) -
-                8.0f * sd_func(vec3(p.x, p.y, p.z - NORMAL_EPSILON), NORMAL_EPSILON_CD) +
-                sd_func(vec3(p.x, p.y, p.z - 2.0f * NORMAL_EPSILON), NORMAL_EPSILON_CD));
+    float dz = (-sdi_func(adjust_point_invocation(inv, vec3(0.0f, 0.0f, 2.0f * NORMAL_EPSILON), NORMAL_EPSILON_CD)) +
+                8.0f * sdi_func(adjust_point_invocation(inv, vec3(0.0f, 0.0f, NORMAL_EPSILON), NORMAL_EPSILON_CD)) -
+                8.0f * sdi_func(adjust_point_invocation(inv, vec3(0.0f, 0.0f, -NORMAL_EPSILON), NORMAL_EPSILON_CD)) +
+                sdi_func(adjust_point_invocation(inv, vec3(0.0f, 0.0f, -2.0f * NORMAL_EPSILON), NORMAL_EPSILON_CD)));
 
     return normalize(vec3(dx, dy, dz));
 }

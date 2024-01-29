@@ -83,14 +83,18 @@ extern "C" __global__ void compute_render(
 
     // ray march and fill preliminary values in render data texture
 
-    auto sds = make_sds_scene(globals, camera);
     RayRender ray_render = render_ray(
         ray,
         cone_radius_at_unit,
-        sds,
+        make_sdi_scene<SdInvocationType::ConeType>(globals, camera),
+        make_sdi_scene<SdInvocationType::SurfaceType>(globals, camera),
+        make_sdi_scene<SdInvocationType::PointType>(globals, camera),
+        make_sdi_scene<SdInvocationType::RayType>(globals, camera),
         runtime_scene.lighting,
         entry
     );
+
+    ray_render.color = vec3(clamp((float) ray_render.hit.cycles * 0.000001f, 0.0f, 1.0f));
 
     render_data_texture.texture[texture_index] = {
         ray_render.hit.depth,

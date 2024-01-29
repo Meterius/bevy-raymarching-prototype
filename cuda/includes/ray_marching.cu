@@ -3,16 +3,17 @@
 #include "../includes/libraries/glm/glm.hpp"
 #include "../includes/bindings.h"
 #include "../includes/types.cu"
+#include "../includes/signed_distance.cu"
 
 using namespace glm;
 
-#define RAY_MARCH_STEP_LIMIT 500
+#define RAY_MARCH_STEP_LIMIT 256
 #define RAY_MARCH_DEPTH_LIMIT 10000.0f
 #define RAY_MARCH_COLLISION_DISTANCE 0.001f
 
-template<bool useConeMarch, typename SdSceneFunc>
+template<typename SdSceneFunc>
 __device__ RayMarchHit ray_march(
-    const SdSceneFunc sd_scene,
+    const SdSceneFunc sdi_scene,
     const Ray ray,
     const ConeMarchTextureValue starting = ConeMarchTextureValue {},
     const float cone_radius_at_unit = 0.0f
@@ -21,28 +22,25 @@ __device__ RayMarchHit ray_march(
         (int) starting.steps,
         ray.position + ray.direction * starting.depth,
         starting.depth,
-        StepLimit
+        StepLimit,
+        clock64()
     };
 
     if (starting.outcome == DepthLimit) {
         hit.outcome = starting.outcome;
     } else {
         for (; hit.steps < RAY_MARCH_STEP_LIMIT; hit.steps++) {
-            float collision_distance = useConeMarch ? max(RAY_MARCH_COLLISION_DISTANCE, cone_radius_at_unit * hit.depth)
-                                                    : RAY_MARCH_COLLISION_DISTANCE;
-            float d = sd_scene(hit.position, collision_distance);
+            float collision_distance = max(RAY_MARCH_COLLISION_DISTANCE, cone_radius_at_unit * hit.depth);
+            float d = sdi_scene(
+                SdInvocation<SdInvocationType::ConeType> { Ray { hit.position, ray.direction }, collision_distance }
+            );
 
             if (d < collision_distance) {
                 hit.outcome = Collision;
                 break;
             }
 
-            if (useConeMarch) {
-                hit.depth += d - collision_distance;
-            } else {
-                hit.depth += d;
-            }
-
+            hit.depth += d - collision_distance;
             hit.position += d * ray.direction;
 
             if (hit.depth > RAY_MARCH_DEPTH_LIMIT) {
@@ -53,13 +51,14 @@ __device__ RayMarchHit ray_march(
     }
 
     hit.steps -= (int) starting.steps;
+    hit.cycles = clock64() - hit.cycles;
 
     return hit;
 }
 
 template<typename SdSceneFunc>
 __device__ float soft_shadow_ray_march(
-    const SdSceneFunc sd_scene,
+    const SdSceneFunc sdi_scene,
     const Ray ray,
     const float w
 ) {
@@ -68,7 +67,9 @@ __device__ float soft_shadow_ray_march(
     float depth = 0.0f;
 
     for (int i = 0; i < RAY_MARCH_STEP_LIMIT; i++) {
-        float sd = sd_scene(ray.position + ray.direction * depth, RAY_MARCH_COLLISION_DISTANCE);
+        float sd = sdi_scene(
+            SdInvocation<SdInvocationType::RayType> { ray.position + ray.direction * depth, ray.direction }
+        );
 
         if (sd <= RAY_MARCH_COLLISION_DISTANCE) {
             return 0.0f;
