@@ -43,6 +43,7 @@ render_ray(
 
     float looking_to_light = (1.0f + dot(-from_array(lighting.sun_lights[0].direction), normal)) * 0.5f;
 
+    surface.color = vec3(0.4f, 0.5f, 0.7f);
     surface.color = 1.0f * mix(
         surface.color * vec3(0.0f, 0.0f, 1.0f), surface.color * vec3(1.0f, 0.0f, 0.0f),
         looking_to_light

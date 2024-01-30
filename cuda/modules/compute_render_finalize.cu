@@ -86,13 +86,11 @@ extern "C" __global__ void compute_render_finalize(
                 vec3(texture_value.depth * 0.00001f);
         // color = from_array(texture_value.color);
         // color = vec3(texture_value.depth * 0.00005f);
-        color = from_array(texture_value.color);
     } else if (texture_value.outcome == DepthLimit) {
         color = vec3(vec3(0.2f, 0.4f, 1.0f) * 3.0f * 0.0f + texture_value.steps * 0.01f);
         color = vec3(0.0f) + 1.0f * powered_step_fac * float(globals.use_step_glow_on_background);
-        color = from_array(texture_value.color);
     } else {
-        color = vec3(0.0, 1.0, 0.0) * from_array(texture_value.color);
+        color = vec3(0.0, 1.0, 0.0) + from_array(texture_value.color);
     }
 
     color = hdr_map_aces_tone(max(color, 0.0f));

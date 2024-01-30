@@ -95,7 +95,13 @@ __device__ SdRuntimeScene runtime_scene;
 template<SdInvocationType type>
 __device__ auto make_sdi_scene(const GlobalsBuffer &globals, const CameraBuffer &camera) {
     return [=](SdInvocation<type> inv) {
-        return sdi_composition(inv, runtime_scene.geometry, 0);
+        float sd = MAX_POSITIVE_F32;
+
+        sd = min(sd, inv.ray.position.y + sin(inv.ray.position.x * 0.01f) * 50.0f);
+
+        return sd;
+
+        // return sdi_composition(inv, runtime_scene.geometry, 0);
     };
 }
 

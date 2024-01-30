@@ -94,7 +94,7 @@ extern "C" __global__ void compute_render(
         entry
     );
 
-    ray_render.color = vec3(clamp((float) ray_render.hit.cycles * 0.000001f, 0.0f, 1.0f));
+    // ray_render.color = vec3(clamp((float) ray_render.hit.cycles * 0.000001f, 0.0f, 1.0f));
 
     render_data_texture.texture[texture_index] = {
         ray_render.hit.depth,

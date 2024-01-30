@@ -19,7 +19,7 @@ __device__ RayMarchHit ray_march(
     const float cone_radius_at_unit = 0.0f
 ) {
     RayMarchHit hit {
-        (int) starting.steps,
+        (int) 0,
         ray.position + ray.direction * starting.depth,
         starting.depth,
         StepLimit,
@@ -30,18 +30,18 @@ __device__ RayMarchHit ray_march(
         hit.outcome = starting.outcome;
     } else {
         for (; hit.steps < RAY_MARCH_STEP_LIMIT; hit.steps++) {
-            float collision_distance = max(RAY_MARCH_COLLISION_DISTANCE, cone_radius_at_unit * hit.depth);
+            float collision_distance = cone_radius_at_unit * hit.depth;
             float d = sdi_scene(
                 SdInvocation<SdInvocationType::ConeType> { Ray { hit.position, ray.direction }, collision_distance }
             );
 
-            if (d < collision_distance) {
+            if (d <= collision_distance + RAY_MARCH_COLLISION_DISTANCE) {
                 hit.outcome = Collision;
                 break;
             }
 
-            hit.depth += d - collision_distance;
-            hit.position += d * ray.direction;
+            hit.depth += (d - collision_distance);
+            hit.position += (d - collision_distance) * ray.direction;
 
             if (hit.depth > RAY_MARCH_DEPTH_LIMIT) {
                 hit.outcome = DepthLimit;
@@ -50,7 +50,6 @@ __device__ RayMarchHit ray_march(
         }
     }
 
-    hit.steps -= (int) starting.steps;
     hit.cycles = clock64() - hit.cycles;
 
     return hit;
