@@ -12,7 +12,8 @@ using namespace glm;
 template<typename SdiFunc, typename SdiSurfFunc, typename SdiPointFunc, typename SdiRayFunc>
 __device__ RayRender
 render_ray(
-    const Ray ray, const float cone_radius_at_unit,
+    const Ray ray,
+    const float cone_radius_at_unit,
     const SdiFunc sdc_func,
     const SdiSurfFunc sds_func,
     const SdiPointFunc sdp_func,

@@ -83,16 +83,18 @@ extern "C" __global__ void compute_render(
 
     // ray march and fill preliminary values in render data texture
 
-    RayRender ray_render = render_ray(
-        ray,
-        cone_radius_at_unit,
-        make_sdi_scene<SdInvocationType::ConeType>(globals, camera),
-        make_sdi_scene<SdInvocationType::SurfaceType>(globals, camera),
-        make_sdi_scene<SdInvocationType::PointType>(globals, camera),
-        make_sdi_scene<SdInvocationType::RayType>(globals, camera),
-        runtime_scene.lighting,
-        entry
-    );
+//    RayRender ray_render = render_ray(
+//        ray,
+//        cone_radius_at_unit,
+//        make_sdi_scene<SdInvocationType::ConeType>(globals, camera),
+//        make_sdi_scene<SdInvocationType::SurfaceType>(globals, camera),
+//        make_sdi_scene<SdInvocationType::PointType>(globals, camera),
+//        make_sdi_scene<SdInvocationType::RayType>(globals, camera),
+//        runtime_scene.lighting,
+//        entry
+//    );
+
+    RayRender ray_render = terrain_render_ray(ray, cone_radius_at_unit);
 
     // ray_render.color = vec3(clamp((float) ray_render.hit.cycles * 0.000001f, 0.0f, 1.0f));
 

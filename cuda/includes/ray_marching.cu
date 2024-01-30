@@ -8,7 +8,7 @@
 using namespace glm;
 
 #define RAY_MARCH_STEP_LIMIT 256
-#define RAY_MARCH_DEPTH_LIMIT 10000.0f
+#define RAY_MARCH_DEPTH_LIMIT 500.0f
 #define RAY_MARCH_COLLISION_DISTANCE 0.001f
 
 template<typename SdSceneFunc>

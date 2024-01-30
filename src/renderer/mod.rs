@@ -37,7 +37,7 @@ pub struct RenderConeCompression {
 impl Default for RenderConeCompression {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             levels: [8, 2],
         }
     }

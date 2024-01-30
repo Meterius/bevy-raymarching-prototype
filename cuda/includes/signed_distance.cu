@@ -28,6 +28,7 @@ enum SdInvocationType {
 
 template<SdInvocationType type>
 struct SdInvocation {
+    Ray ray;
 };
 
 template<>

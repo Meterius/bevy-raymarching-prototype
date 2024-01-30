@@ -94,6 +94,7 @@ extern "C" __global__ void compute_render_finalize(
     }
 
     color = hdr_map_aces_tone(max(color, 0.0f));
+    color = from_array(texture_value.color);
 
     unsigned int rgba = ((unsigned int) (255.0f * color.x) & 0xff) |
                         (((unsigned int) (255.0f * color.y) & 0xff) << 8) |

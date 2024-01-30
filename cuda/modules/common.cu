@@ -1,3 +1,5 @@
+#define GLM_SWIZZLE
+
 #include "../includes/libraries/glm/glm.hpp"
 #include "../includes/bindings.h"
 #include "../includes/color.cu"
@@ -5,6 +7,7 @@
 #include "../includes/signed_distance.cu"
 #include "../includes/rendering.cu"
 #include "../includes/ray_marching.cu"
+#include "../includes/terrain_rendering.cu"
 
 using namespace glm;
 
