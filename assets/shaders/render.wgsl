@@ -65,7 +65,7 @@ fn render_hit(ray: Ray, hit: RayMarchHit) -> vec3<f32> {
     } else if (hit.cutoff_reason == CUTOFF_REASON_STEPS) {
         color = fogColor;
     } else {
-        let normal = sd_scene_normal(hit.position);
+        let normal = sd_scene_normal(hit.origin);
 
         // Shading And Coloring
 
@@ -77,14 +77,14 @@ fn render_hit(ray: Ray, hit: RayMarchHit) -> vec3<f32> {
 
         let base_material_color = color_map_default(
             0.0 * length(
-                hit.position + vec3<f32>(30.0 * sin(GLOBALS.time * 0.1 + 20.75), 40.0 * sin(GLOBALS.time * 0.25 + 10.75), 50.0 * sin(GLOBALS.time * 0.5 + 100.75))
+                hit.origin + vec3<f32>(30.0 * sin(GLOBALS.time * 0.1 + 20.75), 40.0 * sin(GLOBALS.time * 0.25 + 10.75), 50.0 * sin(GLOBALS.time * 0.5 + 100.75))
             ) * 0.001 + (f32(hit.step_depth) / f32(RAY_MARCHING_MAX_STEP_DEPTH)) * 0.1
         ) * 5.0;
 
-        let material = sd_scene_material(hit.position, base_material_color);
+        let material = sd_scene_material(hit.origin, base_material_color);
 
         let phong_light = phong_reflect_light(
-            CAMERA.position, hit.position, normal,
+            CAMERA.origin, hit.origin, normal,
             material,
             scene_light,
         );
@@ -113,7 +113,7 @@ fn render_ray(ray: Ray) -> vec3<f32> {
 
 fn render_pixel(texture_coord: vec2<i32>) -> vec3<f32> {
     if (PIXEL_SAMPLING_RATE == 1) {
-        return render_ray(Ray(CAMERA.position, viewport_coord_to_ray_dir(texture_coord_to_viewport_coord(vec2<f32>(texture_coord)))));
+        return render_ray(Ray(CAMERA.origin, viewport_coord_to_ray_dir(texture_coord_to_viewport_coord(vec2<f32>(texture_coord)))));
     } else {
         var color = vec3<f32>(0.0);
 
@@ -127,7 +127,7 @@ fn render_pixel(texture_coord: vec2<i32>) -> vec3<f32> {
                 let sub_pixel_viewport_coord = texture_coord_to_viewport_coord(vec2<f32>(texture_coord) + offset);
                 let sub_pixel_ray_dir = viewport_coord_to_ray_dir(sub_pixel_viewport_coord);
                 color += render_ray(
-                    Ray(CAMERA.position, sub_pixel_ray_dir)
+                    Ray(CAMERA.origin, sub_pixel_ray_dir)
                 ) / vec3<f32>(f32(PIXEL_SAMPLING_RATE * PIXEL_SAMPLING_RATE));
             }
         }

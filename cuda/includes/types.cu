@@ -14,7 +14,7 @@ long long cycles;
 };
 
 struct __align__(32) Ray {
-vec3 position;
+vec3 origin;
 vec3 direction;
 };
 

@@ -20,7 +20,7 @@ const APPROX_AO_SAMPLE_COUNT = 10;
 const APPROX_AO_SAMPLE_STEP = 0.1;
 
 fn ray_march_hit_approx_soft_shadow(ray: Ray, hit: RayMarchHit, sun_direction: vec3<f32>) -> f32 {
-    let light_hit = ray_march(Ray(hit.position + sun_direction * 0.01, sun_direction), RayMarchOptions(RAY_MARCHER_MAX_DEPTH, RAY_MARCHING_MAX_STEP_DEPTH));
+    let light_hit = ray_march(Ray(hit.origin + sun_direction * 0.01, sun_direction), RayMarchOptions(RAY_MARCHER_MAX_DEPTH, RAY_MARCHING_MAX_STEP_DEPTH));
     return f32(light_hit.cutoff_reason != CUTOFF_REASON_NONE) * clamp(
         pow(light_hit.weighted_shortest_distance, 0.8), 0.0, 1.0,
     );
@@ -31,7 +31,7 @@ fn ray_march_hit_approx_ao(ray: Ray, hit: RayMarchHit) -> f32 {
         return 0.0;
     }
 
-    let normal = sd_scene_normal(hit.position);
+    let normal = sd_scene_normal(hit.origin);
 
     var total = 0.0;
     var collision = false;
@@ -41,7 +41,7 @@ fn ray_march_hit_approx_ao(ray: Ray, hit: RayMarchHit) -> f32 {
         var sd: f32 = 0.0;
 
         if (!collision) {
-            sd = sd_scene(hit.position + normal * delta);
+            sd = sd_scene(hit.origin + normal * delta);
 
             if (sd <= RAY_MARCHER_COLLISION_DISTANCE) {
                 collision = true;
@@ -61,7 +61,7 @@ struct RayMarchOptions {
 }
 
 struct RayMarchHit {
-    position: vec3<f32>,
+    origin: vec3<f32>,
     depth: f32,
     weighted_shortest_distance: f32,
     step_depth: i32,
@@ -80,24 +80,24 @@ var<workgroup> rs_compute_nodes: array<RsComputeNode, 2048> = array<RsComputeNod
 fn ray_march(ray: Ray, options: RayMarchOptions) -> RayMarchHit {
     var hit = RayMarchHit();
     hit.weighted_shortest_distance = 3.40282346638528859812e+38f;
-    hit.position = ray.origin;
+    hit.origin = ray.origin;
 
     for (; hit.step_depth < options.step_depth_limit; hit.step_depth += 1) {
-        var sd = sd_scene(hit.position);
+        var sd = sd_scene(hit.origin);
 
         //
 
-        if (false && length(hit.position) <= 20.0) {
+        if (false && length(hit.origin) <= 20.0) {
             for (var i = 0; i < SD_SCENE.pre_count; i += 1) {
-                rs_compute_nodes[rs_compute_node_offset + i].position = (hit.position - SD_SCENE.pre[i].translation) * SD_SCENE.pre[i].scale;
+                rs_compute_nodes[rs_compute_node_offset + i].origin = (hit.origin - SD_SCENE.pre[i].translation) * SD_SCENE.pre[i].scale;
             }
 
             for (var i = 0; i < SD_SCENE.primitive_count; i += 1) {
-                let dist = length(rs_compute_nodes[rs_compute_node_offset + i].position);
+                let dist = length(rs_compute_nodes[rs_compute_node_offset + i].origin);
 
                 rs_compute_nodes[rs_compute_node_offset + i].sd = select(
-                    min_comp3(abs(rs_compute_nodes[rs_compute_node_offset + i].position)) - 0.5,
-                    length(rs_compute_nodes[rs_compute_node_offset + i].position) - 0.5,
+                    min_comp3(abs(rs_compute_nodes[rs_compute_node_offset + i].origin)) - 0.5,
+                    length(rs_compute_nodes[rs_compute_node_offset + i].origin) - 0.5,
                     SD_SCENE.primitive[i].is_sphere != 0,
                 );
             }
@@ -110,12 +110,12 @@ fn ray_march(ray: Ray, options: RayMarchOptions) -> RayMarchHit {
         //
 
         let cutoff_plane = 100.0;
-        if (false && hit.position.y > cutoff_plane) {
+        if (false && hit.origin.y > cutoff_plane) {
             if (ray.direction.y < 0.0) {
-                sd = (-(hit.position.y - cutoff_plane) / ray.direction.y) + 0.1;
+                sd = (-(hit.origin.y - cutoff_plane) / ray.direction.y) + 0.1;
             } else {
                 hit.step_depth = min(i32(f32(hit.step_depth) + steps_until_depth_limit(sd, hit.depth, options.depth_limit, ray.direction.y)), options.step_depth_limit);
-                hit.position += (options.depth_limit - hit.depth) * ray.direction;
+                hit.origin += (options.depth_limit - hit.depth) * ray.direction;
                 hit.cutoff_reason = CUTOFF_REASON_DISTANCE;
                 hit.depth = options.depth_limit;
                 break;
@@ -135,7 +135,7 @@ fn ray_march(ray: Ray, options: RayMarchOptions) -> RayMarchHit {
         }
 
         hit.depth += sd;
-        hit.position += sd * ray.direction;
+        hit.origin += sd * ray.direction;
 
         if (hit.depth >= options.depth_limit) {
             hit.cutoff_reason = CUTOFF_REASON_DISTANCE;

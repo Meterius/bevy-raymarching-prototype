@@ -20,7 +20,7 @@ __device__ RayMarchHit ray_march(
 ) {
     RayMarchHit hit {
         (int) 0,
-        ray.position + ray.direction * starting.depth,
+        ray.origin + ray.direction * starting.depth,
         starting.depth,
         StepLimit,
         clock64()
@@ -67,7 +67,7 @@ __device__ float soft_shadow_ray_march(
 
     for (int i = 0; i < RAY_MARCH_STEP_LIMIT; i++) {
         float sd = sdi_scene(
-            SdInvocation<SdInvocationType::RayType> { ray.position + ray.direction * depth, ray.direction }
+            SdInvocation<SdInvocationType::RayType> { ray.origin + ray.direction * depth, ray.direction }
         );
 
         if (sd <= RAY_MARCH_COLLISION_DISTANCE) {

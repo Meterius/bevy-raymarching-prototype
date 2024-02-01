@@ -8,7 +8,7 @@
 const SD_RUNTIME_SCENE_NODES = 32;
 
 struct RsComputeNode {
-    position: vec3<f32>,
+    origin: vec3<f32>,
     sd: f32,
 }
 

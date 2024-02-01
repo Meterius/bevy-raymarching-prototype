@@ -54,7 +54,7 @@ __device__ SdInvocation<SdInvocationType::PointType> adjust_point_invocation(
     const float min_radius
 ) {
     return SdInvocation<SdInvocationType::PointType> {
-        Ray { inv.ray.position + offset, inv.ray.direction },
+        Ray { inv.ray.origin + offset, inv.ray.direction },
         max(inv.radius, min_radius)
     };
 }
@@ -140,7 +140,7 @@ bool inside_aabb(const vec3 p, const vec3 bb_min, const vec3 bb_max) {
 }
 
 float ray_distance_to_bb(const Ray &ray, const vec3 &bb_min, const vec3 &bb_max) {
-    if (inside_aabb(ray.position, bb_min, bb_max)) {
+    if (inside_aabb(ray.origin, bb_min, bb_max)) {
         return 0.0f;
     }
 
@@ -150,13 +150,13 @@ float ray_distance_to_bb(const Ray &ray, const vec3 &bb_min, const vec3 &bb_max)
     for (int i = 0; i < 3; ++i) {
         if (abs(ray.direction[i]) < std::numeric_limits<float>::epsilon()) {
             // Ray is parallel to the slab. No hit if origin not within slab
-            if (ray.position[i] < bb_min[i] || ray.position[i] > bb_max[i])
+            if (ray.origin[i] < bb_min[i] || ray.origin[i] > bb_max[i])
                 return std::numeric_limits<float>::max();
         } else {
             // Compute intersection t value of ray with near and far plane of slab
             float ood = 1.0f / ray.direction[i];
-            float t1 = (bb_min[i] - ray.position[i]) * ood;
-            float t2 = (bb_max[i] - ray.position[i]) * ood;
+            float t1 = (bb_min[i] - ray.origin[i]) * ood;
+            float t2 = (bb_max[i] - ray.origin[i]) * ood;
 
             // Make t1 be intersection with near plane, t2 with far plane
             if (t1 > t2) std::swap(t1, t2);
@@ -280,7 +280,7 @@ __device__ float sdi_composition(
 
     RuntimeStackNode sd_runtime_stack[SD_RUNTIME_STACK_MAX_DEPTH];
 
-    vec3 position = inv.ray.position;
+    vec3 position = inv.ray.origin;
 
     sd_runtime_stack[stack_index] = { MAX_POSITIVE_F32 };
 
@@ -359,7 +359,7 @@ __device__ float sdi_composition(
                         break;
                 }
 
-                // when returning reverse position modification
+                // when returning reverse origin modification
                 switch (node->variant) {
                     default:
                     case SdCompositionVariant::Union:
@@ -388,7 +388,7 @@ __device__ float sdi_composition(
                 index = node->child;
 
                 if (!returning) {
-                    // when invoking the node apply position modification
+                    // when invoking the node apply origin modification
                     switch (node->variant) {
                         default:
                         case SdCompositionVariant::Union:

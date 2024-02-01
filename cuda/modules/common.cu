@@ -100,7 +100,7 @@ __device__ auto make_sdi_scene(const GlobalsBuffer &globals, const CameraBuffer 
     return [=](SdInvocation<type> inv) {
         float sd = MAX_POSITIVE_F32;
 
-        sd = min(sd, inv.ray.position.y + sin(inv.ray.position.x * 0.01f) * 50.0f);
+        sd = min(sd, inv.ray.origin.y + sin(inv.ray.origin.x * 0.01f) * 50.0f);
 
         return sd;
 

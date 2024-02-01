@@ -35,7 +35,7 @@ render_ray(
 
     for (int i = 0; i < 0 * lighting.sun_light_count; i++) {
         Ray light_ray = { hit.position, -from_array(lighting.sun_lights[i].direction) };
-        light_ray.position += light_ray.direction * 0.01f;
+        light_ray.origin += light_ray.direction * 0.01f;
         light = max(
             0.05f,
             soft_shadow_ray_march(sdr_func, light_ray, 0.1f)
