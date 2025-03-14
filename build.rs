@@ -92,7 +92,6 @@ fn compile_cuda() {
     for func in vec![
         "compute_render",
         "compute_render_finalize",
-        "compute_compressed_depth",
     ]
     .into_iter()
     {

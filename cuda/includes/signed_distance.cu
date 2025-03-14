@@ -19,52 +19,6 @@ __device__ vec3 wrap(const vec3 p, const vec3 lower, const vec3 higher) {
     };
 }
 
-enum SdInvocationType {
-    ConeType,
-    RayType,
-    PointType,
-    SurfaceType,
-};
-
-template<SdInvocationType type>
-struct SdInvocation {
-    Ray ray;
-};
-
-template<>
-struct SdInvocation<SdInvocationType::ConeType> {
-    Ray ray;
-    float radius;
-};
-
-template<>
-struct SdInvocation<SdInvocationType::RayType> {
-    Ray ray;
-};
-
-template<>
-struct SdInvocation<SdInvocationType::PointType> {
-    Ray ray;
-    float radius;
-};
-
-__device__ SdInvocation<SdInvocationType::PointType> adjust_point_invocation(
-    const SdInvocation<SdInvocationType::PointType> inv,
-    const vec3 offset,
-    const float min_radius
-) {
-    return SdInvocation<SdInvocationType::PointType> {
-        Ray { inv.ray.origin + offset, inv.ray.direction },
-        max(inv.radius, min_radius)
-    };
-}
-
-template<>
-struct SdInvocation<SdInvocationType::SurfaceType> {
-    Ray ray;
-    RenderSurfaceData &surface;
-};
-
 // fractals
 
 #define POWER 7.0f
@@ -187,14 +141,6 @@ __device__ float sd_axes(const vec3 p) {
     return min(min(length(px) - 0.05f, length(py) - 0.05f), length(pz) - 0.05f);
 }
 
-// runtime
-
-struct RuntimeStackNode {
-    float sd;
-};
-
-#define SD_RUNTIME_STACK_MAX_DEPTH 32
-
 __device__ float dot2(const vec3 x) {
     return dot(x, x);
 }
@@ -222,240 +168,41 @@ __device__ float sd_triangle(const vec3 p, const vec3 a, const vec3 b, const vec
         dot(nor, pa) * dot(nor, pa) / dot(nor, nor));
 }
 
-__device__ float sd_mesh(const vec3 p, const unsigned int mesh_id, const SdRuntimeSceneGeometry &geometry) {
-    auto mesh = &geometry.meshes.meshes[mesh_id];
-
-    float sd = MAX_POSITIVE_F32;
-
-    for (unsigned int i = mesh->triangle_start_id; i <= mesh->triangle_end_id; i++) {
-        vec3 v0 = from_array(geometry.meshes.vertices[geometry.meshes.triangles[i].vertex_ids[0]].pos);
-        vec3 v1 = from_array(geometry.meshes.vertices[geometry.meshes.triangles[i].vertex_ids[1]].pos);
-        vec3 v2 = from_array(geometry.meshes.vertices[geometry.meshes.triangles[i].vertex_ids[2]].pos);
-        sd = min(sd, sd_triangle(p, v0, v1, v2));
-    }
-
-    return sd;
-}
-
-__shared__ unsigned int composition_traversal_count[BLOCK_SIZE];
-
-template<SdInvocationType type>
-__device__ bool sdi_composition_should_use_bounding_box_termination(
-    const float bb_dist,
-    const SdInvocation<type> &inv
-) {
-    return bb_dist >= 0.1f;
-}
-
-template<>
-__device__ bool sdi_composition_should_use_bounding_box_termination<SdInvocationType::PointType>(
-    const float bb_dist,
-    const SdInvocation<SdInvocationType::PointType> &inv
-) {
-    return bb_dist >= 0.1f + inv.radius;
-}
-
-template<>
-__device__ bool sdi_composition_should_use_bounding_box_termination<SdInvocationType::ConeType>(
-    const float bb_dist,
-    const SdInvocation<SdInvocationType::ConeType> &inv
-) {
-    return bb_dist >= 0.1f + inv.radius;
-}
-
-template<SdInvocationType type>
-__device__ float sdi_composition(
-    const SdInvocation<type> inv,
-    const SdRuntimeSceneGeometry geometry,
-    const int composition_index
-) {
-    int stack_index = 0;
-    unsigned int index = composition_index;
-
-    float sd = 0.0f;
-    bool returning = false;
-
-    BitSet<32> second_child {};
-    BitSet<32> pos_mirrored {};
-
-    RuntimeStackNode sd_runtime_stack[SD_RUNTIME_STACK_MAX_DEPTH];
-
-    vec3 position = inv.ray.origin;
-
-    sd_runtime_stack[stack_index] = { MAX_POSITIVE_F32 };
-
-    while (stack_index >= 0) {
-#if CUDA_DEBUG == true
-        assert(stack_index >= 0);
-        assert(stack_index < SD_RUNTIME_STACK_MAX_DEPTH);
-#endif
-
-        const SdComposition *const node = &geometry.compositions[index];
-        RuntimeStackNode *const stack_node = &sd_runtime_stack[stack_index];
-
-        // determine bb distance when invoking the node
-        float bound_distance = 0.0f;
-
-        if (!returning) {
-            bound_distance = sd_simple_bounding_box(
-                position, from_array(node->bound_min), from_array(node->bound_max)
-            );
-        }
-
-        if (sdi_composition_should_use_bounding_box_termination<type>(bound_distance, inv)) {
-            // early-bounding box return
-            sd = bound_distance;
-
-            index = node->parent;
-            stack_index -= 1;
-            returning = true;
-        } else if (node->primitive_variant != SdPrimitiveVariant::None) {
-            // primitive return
-            const vec3 center = 0.5f * (from_array(node->bound_min) + from_array(node->bound_max));
-
-            const auto appendix = reinterpret_cast<SdCompositionPrimitiveAppendix *>(&geometry.compositions[index + 1]);
-
-            const quat rot = from_quat_array(appendix->rotation);
-            const vec3 scale = from_array(appendix->scale);
-            const vec3 primitive_position = rotate(inverse(rot), (position - center));
-
-            switch (node->primitive_variant) {
-                default:
-                case SdPrimitiveVariant::None:
-                case SdPrimitiveVariant::Empty:
-                    sd = MAX_POSITIVE_F32;
-                    break;
-
-                case SdPrimitiveVariant::Sphere:
-                    sd = sd_unit_sphere(primitive_position / scale) * minimum(scale);
-                    break;
-
-                case SdPrimitiveVariant::Cube:
-                    sd = sd_box(primitive_position, vec3(0.0f), scale);
-                    break;
-            }
-
-            index = node->parent;
-            stack_index -= 1;
-            returning = true;
-        } else {
-            // node handling
-
-            if (returning && second_child.get(stack_index)) {
-                // returning from second child
-                switch (node->variant) {
-                    case SdCompositionVariant::Difference:
-                        sd = max(stack_node->sd, -sd);
-                        break;
-
-                    case SdCompositionVariant::Intersect:
-                        sd = max(stack_node->sd, sd);
-                        break;
-
-                    default:
-                    case SdCompositionVariant::Mirror:
-                    case SdCompositionVariant::Union:
-                        sd = min(stack_node->sd, sd);
-                        break;
-                }
-
-                // when returning reverse origin modification
-                switch (node->variant) {
-                    default:
-                    case SdCompositionVariant::Union:
-                    case SdCompositionVariant::Intersect:
-                    case SdCompositionVariant::Difference:
-                        break;
-
-                    case SdCompositionVariant::Mirror: {
-                        auto appendix = reinterpret_cast<SdCompositionMirrorAppendix *>(&geometry.compositions[index +
-                                                                                                               1]);
-
-                        vec3 dir = from_array(appendix->direction);
-
-                        position = pos_mirrored.get(stack_index)
-                                   ? position - 2.0f * dot(position - from_array(appendix->translation), dir) *
-                                                dir
-                                   : position;
-                        break;
-                    };
-                }
-
-                index = node->parent;
-                stack_index -= 1;
-                returning = true;
-            } else {
-                index = node->child;
-
-                if (!returning) {
-                    // when invoking the node apply origin modification
-                    switch (node->variant) {
-                        default:
-                        case SdCompositionVariant::Union:
-                        case SdCompositionVariant::Intersect:
-                        case SdCompositionVariant::Difference:
-                            break;
-
-                        case SdCompositionVariant::Mirror: {
-                            auto appendix = &reinterpret_cast<SdCompositionMirrorAppendix *>(
-                                geometry.compositions
-                            )[index + 1];
-
-                            vec3 dir = from_array(appendix->direction);
-                            float diff = dot(position - from_array(appendix->translation), dir);
-
-                            pos_mirrored.set(stack_index, diff < 0.0f);
-                            position =
-                                diff < 0.0f ? position - 2.0f * diff * dir : position;
-                            break;
-                        }
-                    }
-                } else {
-                    // when returning from the first child update the stack sd using the returned sd,
-                    // also offset the child index if the child has indicated it used two entries for its node storage
-                    stack_node->sd = sd;
-                    second_child.set(stack_index, true);
-                    index += node->second_child_offset;
-                }
-
-                stack_index += 1;
-                returning = false;
-
-                // reset stack values when entering the next node, child offset needs not be written as it will
-                // be overwritten by the child's child regardless
-                sd_runtime_stack[stack_index] = { MAX_POSITIVE_F32 };
-                second_child.set(stack_index, false);
-            }
-        }
-    }
-
-    return sd;
-}
-
-// surface
+//
 
 #define NORMAL_EPSILON 0.001f
-#define NORMAL_EPSILON_CD (NORMAL_EPSILON * 4.0f)
 
-template<typename SFunc>
-__device__ vec3 sdi_normal(
-    const SdInvocation<SdInvocationType::PointType> inv,
-    const SFunc sdi_func
-) {
-    float dx = (-sdi_func(adjust_point_invocation(inv, vec3(2.0f * NORMAL_EPSILON, 0.0f, 0.0f), NORMAL_EPSILON_CD)) +
-                8.0f * sdi_func(adjust_point_invocation(inv, vec3(NORMAL_EPSILON, 0.0f, 0.0f), NORMAL_EPSILON_CD)) -
-                8.0f * sdi_func(adjust_point_invocation(inv, vec3(-NORMAL_EPSILON, 0.0f, 0.0f), NORMAL_EPSILON_CD)) +
-                sdi_func(adjust_point_invocation(inv, vec3(-2.0f * NORMAL_EPSILON, 0.0f, 0.0f), NORMAL_EPSILON_CD)));
+class SignedDistanceScene {
+public:
+    __device__ virtual float distance(const vec3 p) const;
 
-    float dy = (-sdi_func(adjust_point_invocation(inv, vec3(0.0f, 2.0f * NORMAL_EPSILON, 0.0f), NORMAL_EPSILON_CD)) +
-                8.0f * sdi_func(adjust_point_invocation(inv, vec3(0.0f, NORMAL_EPSILON, 0.0f), NORMAL_EPSILON_CD)) -
-                8.0f * sdi_func(adjust_point_invocation(inv, vec3(0.0f, -NORMAL_EPSILON, 0.0f), NORMAL_EPSILON_CD)) +
-                sdi_func(adjust_point_invocation(inv, vec3(0.0f, -2.0f * NORMAL_EPSILON, 0.0f), NORMAL_EPSILON_CD)));
+    __device__ vec3 normal(const vec3 p) const {
+        float dx = (-distance(p +  vec3(2.0f * NORMAL_EPSILON, 0.0f, 0.0f)) +
+            8.0f * distance(p +  vec3(NORMAL_EPSILON, 0.0f, 0.0f)) -
+            8.0f * distance(p +  vec3(-NORMAL_EPSILON, 0.0f, 0.0f)) +
+            distance(p +  vec3(-2.0f * NORMAL_EPSILON, 0.0f, 0.0f)));
 
-    float dz = (-sdi_func(adjust_point_invocation(inv, vec3(0.0f, 0.0f, 2.0f * NORMAL_EPSILON), NORMAL_EPSILON_CD)) +
-                8.0f * sdi_func(adjust_point_invocation(inv, vec3(0.0f, 0.0f, NORMAL_EPSILON), NORMAL_EPSILON_CD)) -
-                8.0f * sdi_func(adjust_point_invocation(inv, vec3(0.0f, 0.0f, -NORMAL_EPSILON), NORMAL_EPSILON_CD)) +
-                sdi_func(adjust_point_invocation(inv, vec3(0.0f, 0.0f, -2.0f * NORMAL_EPSILON), NORMAL_EPSILON_CD)));
+        float dy = (-distance(p +  vec3(0.0f, 2.0f * NORMAL_EPSILON, 0.0f)) +
+                    8.0f * distance(p +  vec3(0.0f, NORMAL_EPSILON, 0.0f)) -
+                    8.0f * distance(p +  vec3(0.0f, -NORMAL_EPSILON, 0.0f)) +
+                    distance(p +  vec3(0.0f, -2.0f * NORMAL_EPSILON, 0.0f)));
 
-    return normalize(vec3(dx, dy, dz));
-}
+        float dz = (-distance(p +  vec3(0.0f, 0.0f, 2.0f * NORMAL_EPSILON)) +
+                    8.0f * distance(p +  vec3(0.0f, 0.0f, NORMAL_EPSILON)) -
+                    8.0f * distance(p +  vec3(0.0f, 0.0f, -NORMAL_EPSILON)) +
+                    distance(p +  vec3(0.0f, 0.0f, -2.0f * NORMAL_EPSILON)));
+
+        return normalize(vec3(dx, dy, dz));
+    }
+};
+
+class DefaultSignedDistanceScene : public SignedDistanceScene {
+public:
+    __device__ float distance(const vec3 p) const {
+        return min(
+            sd_box(p, vec3(0.0f, -0.5f, 0.0f), vec3(30.0f, 1.0f, 30.0f)),
+            length(p - vec3(15.0f, 1.5f, 0.0f)) - 1.0f,
+            length(p - vec3(13.0f, 0.75f, 2.0f)) - 1.0f
+        );
+    }
+};

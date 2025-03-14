@@ -1,8 +1,7 @@
 pub mod scene;
 
 use crate::bindings::cuda::{
-    ConeMarchTextureValue, Mesh, MeshBuffer, MeshTriangle, MeshVertex, RenderDataTextureValue,
-    SdComposition, SdRuntimeSceneGeometry, BLOCK_SIZE, CONE_MARCH_LEVELS, MAX_SUN_LIGHT_COUNT,
+    RenderDataTextureValue, BLOCK_SIZE,
 };
 use crate::cudarc_extension::CustomCudaFunction;
 use crate::renderer::scene::RenderSceneSettings;
@@ -15,33 +14,11 @@ use cudarc::nvrtc::Ptx;
 use std::ffi::CString;
 use std::sync::Arc;
 
-const MAX_COMPOSITION_NODE_COUNT: usize = 1000000;
-
-const MAX_VERTEX_COUNT: usize = 65536;
-const MAX_TRIANGLE_COUNT: usize = 65536;
-const MAX_MESH_COUNT: usize = 65536;
-
 const RENDER_TEXTURE_SIZE: (usize, usize) = (2560, 1440);
 
 #[derive(Debug, Clone, Default, Resource, Reflect)]
 #[reflect(Resource)]
 pub struct RenderSettings {}
-
-#[derive(Debug, Clone, Resource, Reflect)]
-#[reflect(Resource)]
-pub struct RenderConeCompression {
-    pub enabled: bool,
-    pub levels: [usize; CONE_MARCH_LEVELS as usize],
-}
-
-impl Default for RenderConeCompression {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            levels: [8, 2],
-        }
-    }
-}
 
 #[derive(Debug, Clone, Default, Component)]
 pub struct RenderCameraTarget {}
@@ -55,41 +32,10 @@ pub struct RenderTargetSprite {}
 #[derive(Clone, Resource, ExtractResource, Deref)]
 struct RenderTargetImage(Handle<Image>);
 
-#[derive(Clone, Debug)]
-struct RenderSceneGeometry {
-    compositions: Box<[SdComposition; MAX_COMPOSITION_NODE_COUNT]>,
-    triangles: Box<[MeshTriangle; MAX_TRIANGLE_COUNT]>,
-    vertices: Box<[MeshVertex; MAX_VERTEX_COUNT]>,
-    meshes: Box<[Mesh; MAX_MESH_COUNT]>,
-}
-
-impl Default for RenderSceneGeometry {
-    fn default() -> Self {
-        Self {
-            compositions: Box::try_from(
-                vec![SdComposition::default(); MAX_COMPOSITION_NODE_COUNT].into_boxed_slice(),
-            )
-            .unwrap(),
-            triangles: Box::try_from(
-                vec![MeshTriangle::default(); MAX_TRIANGLE_COUNT].into_boxed_slice(),
-            )
-            .unwrap(),
-            vertices: Box::try_from(
-                vec![MeshVertex::default(); MAX_VERTEX_COUNT].into_boxed_slice(),
-            )
-            .unwrap(),
-            meshes: Box::try_from(vec![Mesh::default(); MAX_MESH_COUNT].into_boxed_slice())
-                .unwrap(),
-        }
-    }
-}
-
 struct RenderCudaContext {
     #[allow(dead_code)]
     pub device: Arc<CudaDevice>,
-    pub geometry_transferred_event: cudarc::driver::sys::CUevent,
 
-    pub func_compute_compressed_depth: CustomCudaFunction,
     pub func_compute_render: CustomCudaFunction,
     pub func_compute_render_finalize: CustomCudaFunction,
 }
@@ -101,13 +47,6 @@ struct RenderCudaStreams {
 struct RenderCudaBuffers {
     render_data_texture_buffer: CudaSlice<RenderDataTextureValue>,
     render_texture_buffer: CudaSlice<u8>,
-
-    cm_texture_buffers: Vec<CudaSlice<ConeMarchTextureValue>>,
-    compositions_buffer: CudaSlice<SdComposition>,
-
-    mesh_vertex_buffer: CudaSlice<MeshVertex>,
-    mesh_triangle_buffer: CudaSlice<MeshTriangle>,
-    mesh_buffer: CudaSlice<Mesh>,
 }
 
 // App Systems
@@ -163,10 +102,6 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
 // Render Systems
 
 fn setup_cuda(world: &mut World) {
-    let compression = RenderConeCompression::default();
-
-    info!("Ray Marcher Cone Marching Compression: {compression:?}");
-
     let start = std::time::Instant::now();
 
     let device = CudaDevice::new(0).unwrap();
@@ -174,16 +109,6 @@ fn setup_cuda(world: &mut World) {
     info!("CUDA Device Creation took {:.2?} seconds", start.elapsed());
 
     let start = std::time::Instant::now();
-
-    device
-        .load_ptx(
-            Ptx::from_src(include_str!(
-                "../../assets/cuda/compiled/compute_compressed_depth.ptx"
-            )),
-            "compute_compressed_depth",
-            &["compute_compressed_depth"],
-        )
-        .unwrap();
 
     device
         .load_ptx(
@@ -205,12 +130,6 @@ fn setup_cuda(world: &mut World) {
         )
         .unwrap();
 
-    let func_compute_compressed_depth = CustomCudaFunction::from_safe(
-        device
-            .get_func("compute_compressed_depth", "compute_compressed_depth")
-            .unwrap(),
-        device.clone(),
-    );
     let func_compute_render = CustomCudaFunction::from_safe(
         device.get_func("compute_render", "compute_render").unwrap(),
         device.clone(),
@@ -236,75 +155,25 @@ fn setup_cuda(world: &mut World) {
             .unwrap()
     };
 
-    let vertex_buffer = unsafe { device.alloc::<MeshVertex>(MAX_VERTEX_COUNT).unwrap() };
-    let triangle_buffer = unsafe { device.alloc::<MeshTriangle>(MAX_TRIANGLE_COUNT).unwrap() };
-    let mesh_buffer = unsafe { device.alloc::<Mesh>(MAX_MESH_COUNT).unwrap() };
-
-    let compositions_buffer = unsafe {
-        device
-            .alloc::<SdComposition>(MAX_COMPOSITION_NODE_COUNT)
-            .unwrap()
-    };
-
-    let mut cm_texture_buffers = vec![];
-
-    for i in 0..CONE_MARCH_LEVELS as usize {
-        cm_texture_buffers.push(unsafe {
-            device
-                .alloc::<ConeMarchTextureValue>(
-                    (RENDER_TEXTURE_SIZE.0 as f32 / compression.levels[i] as f32).ceil() as usize
-                        * (RENDER_TEXTURE_SIZE.1 as f32 / compression.levels[i] as f32).ceil()
-                            as usize,
-                )
-                .unwrap()
-        });
-    }
-
     let render_stream = device.fork_default_stream().unwrap();
 
     world.insert_resource(RenderSettings::default());
-    world.insert_resource(compression);
     world.insert_non_send_resource(RenderCudaContext {
         device,
-        geometry_transferred_event: cudarc::driver::result::event::create(
-            cudarc::driver::sys::CUevent_flags_enum::CU_EVENT_DEFAULT,
-        )
-        .unwrap(),
         func_compute_render,
         func_compute_render_finalize,
-        func_compute_compressed_depth,
     });
     world.insert_non_send_resource(RenderCudaStreams { render_stream });
     world.insert_non_send_resource(RenderCudaBuffers {
         render_texture_buffer,
         render_data_texture_buffer,
-        cm_texture_buffers,
-        compositions_buffer,
-        mesh_vertex_buffer: vertex_buffer,
-        mesh_triangle_buffer: triangle_buffer,
-        mesh_buffer,
     });
     world.insert_non_send_resource(PreviousRenderParameter::default());
-    world.insert_non_send_resource(RenderSceneGeometry::default());
-
-    let mut geometry = world.non_send_resource_mut::<RenderSceneGeometry>();
-
-    unsafe {
-        cudarc::driver::sys::cuMemHostRegister_v2(
-            geometry.compositions.as_mut_ptr() as *mut _,
-            geometry.compositions.len() * std::mem::size_of::<SdComposition>(),
-            0,
-        )
-        .result()
-        .unwrap()
-    };
 }
 
 struct RenderParameters {
     globals: crate::bindings::cuda::GlobalsBuffer,
     camera: crate::bindings::cuda::CameraBuffer,
-    sd_runtime_scene: crate::bindings::cuda::SdRuntimeScene,
-    cm_textures: crate::bindings::cuda::ConeMarchTextures,
     render_texture: crate::bindings::cuda::Texture,
     render_data_texture: crate::bindings::cuda::RenderDataTexture,
 }
@@ -316,8 +185,6 @@ struct PreviousRenderParameter {
 
 fn render(
     settings: Res<RenderSceneSettings>,
-    compression: Res<RenderConeCompression>,
-    geometry: NonSend<RenderSceneGeometry>,
     time: Res<Time>,
     camera: Query<(&Camera, &Projection, &GlobalTransform), With<RenderCameraTarget>>,
     render_context: NonSend<RenderCudaContext>,
@@ -355,57 +222,9 @@ fn render(
 
     let range_id = nvtx::range_start!("Render System Invoke");
 
-    // Geometry Transfer
-
-    unsafe {
-        cudarc::driver::result::memcpy_htod_async(
-            render_buffers.compositions_buffer.device_ptr().clone(),
-            &geometry.compositions.as_slice(),
-            render_streams.render_stream.stream,
-        )
-        .unwrap()
-    };
-
-    unsafe {
-        cudarc::driver::result::memcpy_htod_async(
-            render_buffers.mesh_buffer.device_ptr().clone(),
-            &geometry.meshes.as_slice(),
-            render_streams.render_stream.stream,
-        )
-        .unwrap()
-    };
-
-    unsafe {
-        cudarc::driver::result::memcpy_htod_async(
-            render_buffers.mesh_vertex_buffer.device_ptr().clone(),
-            &geometry.vertices.as_slice(),
-            render_streams.render_stream.stream,
-        )
-        .unwrap()
-    };
-
-    unsafe {
-        cudarc::driver::result::memcpy_htod_async(
-            render_buffers.mesh_triangle_buffer.device_ptr().clone(),
-            &geometry.triangles.as_slice(),
-            render_streams.render_stream.stream,
-        )
-        .unwrap()
-    };
-
-    unsafe {
-        cudarc::driver::result::event::record(
-            render_context.geometry_transferred_event.clone(),
-            render_streams.render_stream.stream.clone(),
-        )
-        .unwrap()
-    };
-
     // Render Parameters
 
     let globals = crate::bindings::cuda::GlobalsBuffer {
-        use_step_glow_on_foreground: settings.enable_step_glow_on_foreground,
-        use_step_glow_on_background: settings.enable_step_glow_on_background,
         time: time.elapsed_seconds(),
         tick: tick.clone(),
         render_texture_size: [RENDER_TEXTURE_SIZE.0 as u32, RENDER_TEXTURE_SIZE.1 as u32],
@@ -426,35 +245,6 @@ fn render(
         },
     };
 
-    let mut sun_lights = Vec::with_capacity(MAX_SUN_LIGHT_COUNT as usize);
-
-    for _ in 0..MAX_SUN_LIGHT_COUNT as usize {
-        sun_lights.push(crate::bindings::cuda::SunLight {
-            direction: Vec3::new(1.0, -1.0, 0.2).normalize().into(),
-        });
-    }
-
-    let sd_runtime_scene = crate::bindings::cuda::SdRuntimeScene {
-        geometry: SdRuntimeSceneGeometry {
-            compositions: unsafe {
-                std::mem::transmute(*(&render_buffers.compositions_buffer).device_ptr())
-            },
-            meshes: MeshBuffer {
-                meshes: unsafe { std::mem::transmute(*(&render_buffers.mesh_buffer).device_ptr()) },
-                triangles: unsafe {
-                    std::mem::transmute(*(&render_buffers.mesh_triangle_buffer).device_ptr())
-                },
-                vertices: unsafe {
-                    std::mem::transmute(*(&render_buffers.mesh_vertex_buffer).device_ptr())
-                },
-            },
-        },
-        lighting: crate::bindings::cuda::SdRuntimeSceneLighting {
-            sun_light_count: 1,
-            sun_lights: sun_lights.try_into().unwrap(),
-        },
-    };
-
     let render_texture = crate::bindings::cuda::Texture {
         texture: unsafe {
             std::mem::transmute(*(&render_buffers.render_texture_buffer).device_ptr())
@@ -469,68 +259,14 @@ fn render(
         size: [RENDER_TEXTURE_SIZE.0 as _, RENDER_TEXTURE_SIZE.1 as _],
     };
 
-    let mut cm_textures = vec![];
-
-    for i in 0..CONE_MARCH_LEVELS as u32 {
-        cm_textures.push(crate::bindings::cuda::ConeMarchTexture {
-            texture: unsafe {
-                std::mem::transmute(*(&render_buffers.cm_texture_buffers[i as usize]).device_ptr())
-            },
-            size: [
-                (RENDER_TEXTURE_SIZE.0 as f32 / compression.levels[i as usize] as f32).ceil()
-                    as u32,
-                (RENDER_TEXTURE_SIZE.1 as f32 / compression.levels[i as usize] as f32).ceil()
-                    as u32,
-            ],
-        });
-    }
-
-    let cm_textures = crate::bindings::cuda::ConeMarchTextures {
-        textures: cm_textures.try_into().unwrap(),
-    };
-
     let parameters = RenderParameters {
-        cm_textures,
         camera,
         globals,
         render_data_texture,
         render_texture,
-        sd_runtime_scene,
     };
 
     //
-
-    if compression.enabled {
-        for i in 0..CONE_MARCH_LEVELS as u32 {
-            let grid_size = ((cm_textures.textures[i as usize].size[0]
-                * cm_textures.textures[i as usize].size[0]) as f32
-                / BLOCK_SIZE as usize as f32)
-                .ceil() as u32;
-
-            unsafe {
-                render_context
-                    .func_compute_compressed_depth
-                    .clone()
-                    .launch_on_stream(
-                        &render_streams.render_stream,
-                        LaunchConfig {
-                            block_dim: (BLOCK_SIZE as usize as u32, 1, 1),
-                            grid_dim: (grid_size, 1, 1),
-                            shared_mem_bytes: 0,
-                        },
-                        (
-                            i,
-                            parameters.render_data_texture.clone(),
-                            parameters.cm_textures.clone(),
-                            parameters.globals.clone(),
-                            parameters.camera.clone(),
-                            parameters.sd_runtime_scene.clone(),
-                        ),
-                    )
-                    .unwrap()
-            };
-        }
-    }
 
     let render_parameters = Some(&parameters);
 
@@ -553,11 +289,8 @@ fn render(
                     },
                     (
                         render_parameters.render_data_texture.clone(),
-                        render_parameters.cm_textures.clone(),
                         render_parameters.globals.clone(),
                         render_parameters.camera.clone(),
-                        render_parameters.sd_runtime_scene.clone(),
-                        compression.enabled,
                     ),
                 )
                 .unwrap()
@@ -583,7 +316,6 @@ fn render(
                         render_parameters.render_texture.clone(),
                         render_parameters.render_data_texture.clone(),
                         render_parameters.globals.clone(),
-                        compression.enabled,
                     ),
                 )
                 .unwrap()
@@ -630,8 +362,7 @@ pub struct RayMarcherRenderPlugin {}
 impl Plugin for RayMarcherRenderPlugin {
     fn build(&self, app: &mut App) {
         // Main App Build
-        app.register_type::<RenderConeCompression>()
-            .add_systems(Startup, (setup, setup_cuda))
+        app.add_systems(Startup, (setup, setup_cuda))
             .add_systems(Last, render)
             .add_systems(PostUpdate, (synchronize_target_sprite,));
     }

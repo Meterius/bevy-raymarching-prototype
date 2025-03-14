@@ -12,7 +12,6 @@ add_executable(
     cuda/includes/rendering.cu
     cuda/includes/ray_marching.cu
         cuda/modules/compute_render.cu
-        cuda/modules/compute_compressed_depth.cu
         cuda/modules/compute_render_finalize.cu
         cuda/includes/types.cu
 )

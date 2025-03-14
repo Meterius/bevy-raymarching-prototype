@@ -7,7 +7,6 @@
 #include "../includes/signed_distance.cu"
 #include "../includes/rendering.cu"
 #include "../includes/ray_marching.cu"
-#include "../includes/terrain_rendering.cu"
 
 using namespace glm;
 
@@ -89,23 +88,6 @@ __device__ vec3 camera_to_ray(
         p.x * fov_fac * width_factor *
         vec3(CAMERA.right[0], CAMERA.right[1], CAMERA.right[2])
     );
-}
-
-// scene
-
-__device__ SdRuntimeScene runtime_scene;
-
-template<SdInvocationType type>
-__device__ auto make_sdi_scene(const GlobalsBuffer &globals, const CameraBuffer &camera) {
-    return [=](SdInvocation<type> inv) {
-        float sd = MAX_POSITIVE_F32;
-
-        sd = min(sd, inv.ray.origin.y + sin(inv.ray.origin.x * 0.01f) * 50.0f);
-
-        return sd;
-
-        // return sdi_composition(inv, runtime_scene.geometry, 0);
-    };
 }
 
 // ray-marching
