@@ -19,16 +19,15 @@ render_ray(
     };
     RayMarchHit hit = ray_march(scene, ray);
 
-    float light = 1.0f;
     vec3 normal = scene.normal(hit.position);
 
     float looking_to_light = (1.0f + dot(-normalize(vec3(1.0f, -0.25f, 0.25f)), normal)) * 0.5f;
+    float occlusion = hit.outcome == RayMarchHitOutcome::Collision
+        ? ray_march_ambient_occlusion(scene, Ray { hit.position, normal }) : 1.0f;
+
+    float light = looking_to_light * (0.2f + 0.8f * occlusion);
 
     surface.color = vec3(0.4f, 0.5f, 0.7f);
-    surface.color = 1.0f * mix(
-        surface.color * 0.01f, surface.color * 1.0f,
-        looking_to_light
-    );
 
     return RayRender {
         hit, surface.color, light

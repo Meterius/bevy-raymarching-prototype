@@ -19,6 +19,11 @@ __device__ vec3 wrap(const vec3 p, const vec3 lower, const vec3 higher) {
     };
 }
 
+__device__ float sigmoid_min(float a, float b, float k) {
+    float r = exp2(-a/k) + exp2(-b/k);
+    return -k*log2(r);
+}
+
 // fractals
 
 #define POWER 7.0f
@@ -57,6 +62,10 @@ __device__ float sd_unit_mandelbulb(const vec3 p) {
 
 __device__ float sd_unit_sphere(const vec3 p) {
     return length(p) - 0.5f;
+}
+
+__device__ float sd_sphere(const vec3 p, const vec3 sp, const float r) {
+    return length(p - sp) - r;
 }
 
 __device__ float sd_box(const vec3 p, const vec3 bp, const vec3 bs) {
@@ -199,10 +208,15 @@ public:
 class DefaultSignedDistanceScene : public SignedDistanceScene {
 public:
     __device__ float distance(const vec3 p) const {
-        return min(
-            sd_box(p, vec3(0.0f, -0.5f, 0.0f), vec3(30.0f, 1.0f, 30.0f)),
-            length(p - vec3(15.0f, 1.5f, 0.0f)) - 1.0f,
-            length(p - vec3(13.0f, 0.75f, 2.0f)) - 1.0f
-        );
+        float d = sd_box(p, vec3(0.0f, -0.5f, 0.0f), vec3(30.0f, 1.0f, 30.0f));
+
+        d = min(d, sd_sphere(p, vec3(5.0f, 1.0f, 0.0f), 1.0f));
+        d = min(d, sd_sphere(p, vec3(3.0f, 1.0f, 3.0f), 2.0f));
+        d = min(d, sd_sphere(p, vec3(7.0f, 1.0f, -3.0f), 2.5f));
+
+        d = sigmoid_min(d, sd_sphere(p, vec3(-10.0f, 1.0f, -3.0f), 2.5f), 1.2f);
+        d = min(d, sd_box(p, vec3(7.0f, 1.0f, 3.0f), vec3(2.0f)));
+
+        return d;
     }
 };
