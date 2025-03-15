@@ -43,4 +43,8 @@ struct CameraBuffer {
     float fov;
 };
 
+struct SceneBuffer {
+    float sun_direction[3];
+};
+
 // CPU

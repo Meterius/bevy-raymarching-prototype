@@ -160,15 +160,6 @@ fn compile_cuda() {
         add_derive_extensions_to_structs(
             bindings.to_string().as_str(),
             &[
-                "SdSpherePrimitive",
-                "SdCubePrimitive",
-                "SdComposition",
-                "SdCompositionMirrorAppendix",
-                "SdCompositionPrimitiveAppendix",
-                "SdCompositionPrimitiveTriangleAppendix",
-                "MeshVertex",
-                "MeshTriangle",
-                "Mesh",
             ],
             &["Default"],
         )

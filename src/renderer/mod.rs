@@ -174,6 +174,7 @@ fn setup_cuda(world: &mut World) {
 struct RenderParameters {
     globals: crate::bindings::cuda::GlobalsBuffer,
     camera: crate::bindings::cuda::CameraBuffer,
+    scene: crate::bindings::cuda::SceneBuffer,
     render_texture: crate::bindings::cuda::Texture,
     render_data_texture: crate::bindings::cuda::RenderDataTexture,
 }
@@ -245,6 +246,10 @@ fn render(
         },
     };
 
+    let scene = crate::bindings::cuda::SceneBuffer {
+        sun_direction: Vec3::new(1.0f32, -1.0f32, 1.0f32).normalize().as_ref().clone(),
+    };
+
     let render_texture = crate::bindings::cuda::Texture {
         texture: unsafe {
             std::mem::transmute(*(&render_buffers.render_texture_buffer).device_ptr())
@@ -262,6 +267,7 @@ fn render(
     let parameters = RenderParameters {
         camera,
         globals,
+        scene,
         render_data_texture,
         render_texture,
     };
@@ -291,6 +297,7 @@ fn render(
                         render_parameters.render_data_texture.clone(),
                         render_parameters.globals.clone(),
                         render_parameters.camera.clone(),
+                        render_parameters.scene.clone(),
                     ),
                 )
                 .unwrap()

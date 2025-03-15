@@ -19,6 +19,7 @@ quote = "1.0.35"
 rand = "0.8.5"
 syn = "2.0.48"
 num-traits = "0.2.17"
+exr = "1.73.0"
 
 [build-dependencies]
 syn = "2.0.48"

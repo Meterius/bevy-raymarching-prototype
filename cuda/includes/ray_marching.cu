@@ -14,6 +14,25 @@ using namespace glm;
 #define RAY_MARCH_AO_STEP_COUNT 10
 #define RAY_MARCH_AO_STEP_LIMIT 1.0f
 
+#define RAY_MARCH_SS_MIN_T 0.025f
+#define RAY_MARCH_SS_MAX_T 50.0f
+#define RAY_MARCH_SS_W 0.1f
+
+__device__ float ray_march_softshadow(const SignedDistanceScene& scene, const Ray ray) {
+    float res = 1.0f;
+    float t = RAY_MARCH_SS_MIN_T;
+
+    for(int i = 0; i < RAY_MARCH_STEP_LIMIT && t < RAY_MARCH_SS_MAX_T; i++) {
+        float h = scene.distance(ray.origin + vec3(t) * ray.direction);
+        res = min( res, h/(RAY_MARCH_SS_W*t) );
+        t += clamp(h, 0.005f, 0.50f);
+        if( res < -1.0f) break;
+    }
+
+    res = max(res,-1.0f);
+    return clamp(0.25f*(1.0f+res)*(1.0f+res)*(2.0f-res), 0.0f, 1.0f);
+}
+
 __device__ float ray_march_ambient_occlusion(
     const SignedDistanceScene& scene,
     const Ray ray
