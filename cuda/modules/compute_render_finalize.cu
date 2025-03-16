@@ -11,15 +11,7 @@ extern "C" __global__ void compute_render_finalize(
 
     RenderDataTextureValue texture_value = render_data_texture.texture[texture_index];
 
-    vec3 color;
-    if (texture_value.outcome == Collision) {
-        color = from_array(texture_value.color) * (0.1f + 0.9f * texture_value.light) + vec3(texture_value.depth * 0.00001f);
-    } else if (texture_value.outcome == DepthLimit) {
-        color = vec3(0.0f, 1.0f, 0.0f);
-    } else {
-        color = vec3(0.0f, 0.0f, 1.0f);
-    }
-
+    vec3 color = from_array(texture_value.color);
     color = hdr_map_aces_tone(max(color, 0.0f));
 
     unsigned int rgba = ((unsigned int) (255.0f * color.x) & 0xff) |

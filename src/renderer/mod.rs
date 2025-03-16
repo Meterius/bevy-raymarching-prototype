@@ -4,14 +4,12 @@ use crate::bindings::cuda::{
     RenderDataTextureValue, BLOCK_SIZE,
 };
 use crate::cudarc_extension::CustomCudaFunction;
-use crate::renderer::scene::RenderSceneSettings;
 use bevy::core_pipeline::clear_color::ClearColorConfig;
 use bevy::render::extract_resource::ExtractResource;
 use bevy::window::PrimaryWindow;
 use bevy::{prelude::*, render::render_resource::*};
 use cudarc::driver::{CudaDevice, CudaSlice, CudaStream, DevicePtr, LaunchAsync, LaunchConfig};
 use cudarc::nvrtc::Ptx;
-use std::ffi::CString;
 use std::sync::Arc;
 
 const RENDER_TEXTURE_SIZE: (usize, usize) = (2560, 1440);
@@ -32,6 +30,9 @@ pub struct RenderTargetSprite {}
 #[derive(Clone, Resource, ExtractResource, Deref)]
 struct RenderTargetImage(Handle<Image>);
 
+#[derive(Clone, Resource, ExtractResource, Deref)]
+struct EnvironmentImage(Handle<Image>);
+
 struct RenderCudaContext {
     #[allow(dead_code)]
     pub device: Arc<CudaDevice>,
@@ -46,7 +47,11 @@ struct RenderCudaStreams {
 
 struct RenderCudaBuffers {
     render_data_texture_buffer: CudaSlice<RenderDataTextureValue>,
+    render_data_texture_buffer_size: [usize; 2],
     render_texture_buffer: CudaSlice<u8>,
+    render_texture_buffer_size: [usize; 2],
+    environment_texture_buffer: CudaSlice<u8>,
+    environment_texture_buffer_size: [usize; 2],
 }
 
 // App Systems
@@ -65,6 +70,39 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     image.texture_descriptor.usage =
         TextureUsages::COPY_DST | TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING;
     let image = images.add(image);
+
+    let env_image_path = "assets/images/loc00184-22-8k.exr";
+    let env_image = exr::image::read::read_first_rgba_layer_from_file(
+        env_image_path,
+        |size, _| {
+            let mut image = Image::new_fill(
+                Extent3d {
+                    width: size.0 as u32,
+                    height: size.1 as u32,
+                    depth_or_array_layers: 1,
+                },
+                TextureDimension::D2,
+                &[0, 0, 0, 255],
+                TextureFormat::Rgba8Unorm,
+            );
+
+            image.texture_descriptor.usage =
+                TextureUsages::COPY_DST | TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING;
+
+            return image;
+        },
+        |image, pos, val: (f32, f32, f32, f32)| {
+            let idx = 4 * (image.texture_descriptor.size.width as usize * pos.1 + pos.0);
+            image.data[idx] = (val.0 * 255.0f32) as u8;
+            image.data[idx + 1] = (val.1 * 255.0f32) as u8;
+            image.data[idx + 2] = (val.2 * 255.0f32) as u8;
+            image.data[idx + 3] = 255;
+        },
+    ).unwrap().layer_data.channel_data.pixels;
+
+    info!("Loaded environment image from \"{env_image_path}\" with size {:?}", env_image.texture_descriptor.size);
+
+    let env_image = images.add(env_image);
 
     commands.spawn((
         SpriteBundle {
@@ -97,6 +135,7 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     ));
 
     commands.insert_resource(RenderTargetImage(image));
+    commands.insert_resource(EnvironmentImage(env_image));
 }
 
 // Render Systems
@@ -155,6 +194,14 @@ fn setup_cuda(world: &mut World) {
             .unwrap()
     };
 
+    let env_image = world.resource::<Assets<Image>>().get(&world.resource::<EnvironmentImage>().0).unwrap();
+    let environment_texture_buffer = unsafe {
+        device
+            .alloc::<u8>(env_image.data.len())
+            .unwrap()
+    };
+    let environment_texture_size = [env_image.texture_descriptor.size.width as usize, env_image.texture_descriptor.size.height as usize];
+
     let render_stream = device.fork_default_stream().unwrap();
 
     world.insert_resource(RenderSettings::default());
@@ -166,7 +213,11 @@ fn setup_cuda(world: &mut World) {
     world.insert_non_send_resource(RenderCudaStreams { render_stream });
     world.insert_non_send_resource(RenderCudaBuffers {
         render_texture_buffer,
+        render_texture_buffer_size: [RENDER_TEXTURE_SIZE.0 as _, RENDER_TEXTURE_SIZE.1 as _],
         render_data_texture_buffer,
+        render_data_texture_buffer_size: [RENDER_TEXTURE_SIZE.0 as _, RENDER_TEXTURE_SIZE.1 as _],
+        environment_texture_buffer,
+        environment_texture_buffer_size: environment_texture_size,
     });
     world.insert_non_send_resource(PreviousRenderParameter::default());
 }
@@ -177,6 +228,7 @@ struct RenderParameters {
     scene: crate::bindings::cuda::SceneBuffer,
     render_texture: crate::bindings::cuda::Texture,
     render_data_texture: crate::bindings::cuda::RenderDataTexture,
+    environment_texture: crate::bindings::cuda::Texture,
 }
 
 #[derive(Default)]
@@ -185,12 +237,12 @@ struct PreviousRenderParameter {
 }
 
 fn render(
-    settings: Res<RenderSceneSettings>,
     time: Res<Time>,
     camera: Query<(&Camera, &Projection, &GlobalTransform), With<RenderCameraTarget>>,
     render_context: NonSend<RenderCudaContext>,
     render_streams: NonSendMut<RenderCudaStreams>,
     render_buffers: NonSendMut<RenderCudaBuffers>,
+    environment_image: Res<EnvironmentImage>,
     render_target_image: Res<RenderTargetImage>,
     mut images: ResMut<Assets<Image>>,
 
@@ -199,6 +251,28 @@ fn render(
     mut previous_render_parameters: NonSendMut<PreviousRenderParameter>,
 ) {
     let range_id = nvtx::range_start!("Render System Wait For Previous Frame");
+
+    if *tick == 0 {
+        let env_image = images.get_mut(&environment_image.0).unwrap();
+
+        unsafe {
+            cudarc::driver::sys::cuMemHostRegister_v2(
+                env_image.data.as_mut_ptr() as *mut _,
+                env_image.data.as_mut_slice().len(),
+                0,
+            )
+            .result()
+            .unwrap()
+        };
+
+        unsafe {
+            cudarc::driver::result::memcpy_htod_sync(
+                *render_buffers.environment_texture_buffer.device_ptr(),
+                env_image.data.as_slice(),
+            )
+            .unwrap()
+        };
+    }
 
     let image = images.get_mut(&render_target_image.0).unwrap();
     let (cam, cam_projection, cam_transform) = camera.single();
@@ -254,14 +328,21 @@ fn render(
         texture: unsafe {
             std::mem::transmute(*(&render_buffers.render_texture_buffer).device_ptr())
         },
-        size: [RENDER_TEXTURE_SIZE.0 as _, RENDER_TEXTURE_SIZE.1 as _],
+        size: [render_buffers.render_texture_buffer_size[0] as _, render_buffers.render_texture_buffer_size[1] as _],
     };
 
     let render_data_texture = crate::bindings::cuda::RenderDataTexture {
         texture: unsafe {
             std::mem::transmute(*(&render_buffers.render_data_texture_buffer).device_ptr())
         },
-        size: [RENDER_TEXTURE_SIZE.0 as _, RENDER_TEXTURE_SIZE.1 as _],
+        size: [render_buffers.render_data_texture_buffer_size[0] as _, render_buffers.render_data_texture_buffer_size[1] as _],
+    };
+
+    let environment_texture = crate::bindings::cuda::Texture {
+        texture: unsafe {
+            std::mem::transmute(*(&render_buffers.environment_texture_buffer).device_ptr())
+        },
+        size: [render_buffers.environment_texture_buffer_size[0] as _, render_buffers.environment_texture_buffer_size[1] as _],
     };
 
     let parameters = RenderParameters {
@@ -270,6 +351,7 @@ fn render(
         scene,
         render_data_texture,
         render_texture,
+        environment_texture,
     };
 
     //
@@ -298,6 +380,7 @@ fn render(
                         render_parameters.globals.clone(),
                         render_parameters.camera.clone(),
                         render_parameters.scene.clone(),
+                        render_parameters.environment_texture.clone()
                     ),
                 )
                 .unwrap()
@@ -369,7 +452,8 @@ pub struct RayMarcherRenderPlugin {}
 impl Plugin for RayMarcherRenderPlugin {
     fn build(&self, app: &mut App) {
         // Main App Build
-        app.add_systems(Startup, (setup, setup_cuda))
+        app.add_systems(Startup, setup)
+            .add_systems(PostStartup, setup_cuda)
             .add_systems(Last, render)
             .add_systems(PostUpdate, (synchronize_target_sprite,));
     }

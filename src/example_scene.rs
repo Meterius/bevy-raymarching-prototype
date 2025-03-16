@@ -1,12 +1,6 @@
 use crate::renderer::RenderCameraTarget;
 use bevy::prelude::*;
 use bevy_flycam::FlyCam;
-use num_traits::pow::Pow;
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
-
-const SAMPLE_SPHERE_DISTANCE: f32 = 120.0;
-const SAMPLE_SPHERE_CHUNK_DISTANCE: f32 = 1000.0;
 
 pub fn setup_scene(
     mut commands: Commands,

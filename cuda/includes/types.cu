@@ -21,7 +21,6 @@ vec3 direction;
 struct RayRender {
     struct RayMarchHit hit;
     vec3 color;
-    float light;
 };
 
 struct RenderSurfaceData {

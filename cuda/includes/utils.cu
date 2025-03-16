@@ -23,6 +23,16 @@ __device__ vec3 from_array(const float p[3]) { return vec3(p[0], p[1], p[2]); }
 
 __device__ quat from_quat_array(const float p[4]) { return quat(p[0], p[1], p[2], p[3]); }
 
+__device__ float random(u32& random_state) {
+    random_state = random_state ^ 2747636419u;
+    random_state = random_state * 2654435769u;
+    random_state = random_state ^ (random_state >> 16u);
+    random_state = random_state * 2654435769u;
+    random_state = random_state ^ (random_state >> 16u);
+    random_state = random_state * 2654435769u;
+    return f32(random_state) / 4294967296.0;
+}
+
 template<uint32_t N>
 class BitSet {
     static_assert(N > 0, "N must be positive");

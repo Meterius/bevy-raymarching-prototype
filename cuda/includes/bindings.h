@@ -15,7 +15,6 @@ struct RenderDataTextureValue {
     float steps;
     enum RayMarchHitOutcome outcome;
     float color[3];
-    float light;
 };
 
 struct RenderDataTexture {
