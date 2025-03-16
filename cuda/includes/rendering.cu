@@ -9,8 +9,16 @@
 
 using namespace glm;
 
-__device__ vec3 skybox(const Texture& environment, vec3 dir, vec3 sun_dir) {
-    const float sun_proj = dot(dir, -sun_dir);
+struct RayRenderParameters {
+    const SceneBuffer& scene;
+    const SignedDistanceScene& sd_scene;
+};
+
+__device__ vec3 skybox(
+    const RayRenderParameters parameters,
+    const vec3 direction
+) {
+    const float sun_proj = dot(direction, -from_array(parameters.scene.sun.direction));
     const float sun_angle = acos(sun_proj);
 
     float SUN_DISK_ANGLE = PI * 0.5f / 180.0f;
@@ -18,8 +26,10 @@ __device__ vec3 skybox(const Texture& environment, vec3 dir, vec3 sun_dir) {
 
     vec3 sun_color = vec3(20.0f);
 
-    float azimuth = clamp(0.5f + atan2(dir.z, dir.x) / (2.0f * PI), 0.0f, 1.0f);
-    float elevation = clamp(0.5f + atan2(dir.y, sqrtf(dir.x * dir.x + dir.z * dir.z)) / PI, 0.0f, 1.0f);
+    float azimuth = clamp(0.5f + atan2(direction.z, direction.x) / (2.0f * PI), 0.0f, 1.0f);
+    float elevation = clamp(0.5f + atan2(direction.y, sqrtf(direction.x * direction.x + direction.z * direction.z)) / PI, 0.0f, 1.0f);
+
+    auto environment = parameters.scene.environment_texture;
 
     ivec2 environment_pos = {
         min(int(float(environment.size[0]) * azimuth), environment.size[0] - 1),
@@ -40,15 +50,8 @@ __device__ vec3 skybox(const Texture& environment, vec3 dir, vec3 sun_dir) {
 }
 
 __device__ RayRender
-render_ray(
-    const Ray ray,
-    const SceneBuffer& scene,
-    const SignedDistanceScene& sd_scene,
-    const Texture& environment
-) {
-    vec3 sun_dir = { scene.sun_direction[0], scene.sun_direction[1], scene.sun_direction[2] };
-
-    RayMarchHit hit = ray_march(sd_scene, ray);
+render_ray(const RayRenderParameters parameters, const Ray ray) {
+    RayMarchHit hit = ray_march(parameters.sd_scene, ray);
 
     vec3 material_color = vec3(0.4f, 0.5f, 0.7f);
 
@@ -56,16 +59,16 @@ render_ray(
     vec3 color = vec3(0.0f);
 
     if (hit.outcome == Collision) {
-        vec3 normal = sd_scene.normal(hit.position);
+        vec3 normal = parameters.sd_scene.normal(hit.position);
 
-        float looking_to_light = (1.0f + dot(-sun_dir, normal)) * 0.5f;
-        float occlusion = ray_march_ambient_occlusion(sd_scene, Ray { hit.position, normal });
-        float shadow = ray_march_softshadow(sd_scene, Ray { hit.position, -sun_dir });
+        float looking_to_light = (1.0f + dot(-from_array(parameters.scene.sun.direction), normal)) * 0.5f;
+        float occlusion = ray_march_ambient_occlusion(parameters.sd_scene, Ray { hit.position, normal });
+        float shadow = ray_march_softshadow(parameters.sd_scene, Ray { hit.position, -from_array(parameters.scene.sun.direction) });
 
         light = (0.8f + 0.2f * looking_to_light) * (0.3f + 0.7f * occlusion) * (0.1f + 0.9f * shadow);
         color = material_color * (0.1f + 0.9f * light);
     } else {
-        color = skybox(environment, ray.direction, sun_dir);
+        color = skybox(parameters, ray.direction);
     }
 
     return RayRender {

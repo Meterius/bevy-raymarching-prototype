@@ -228,7 +228,6 @@ struct RenderParameters {
     scene: crate::bindings::cuda::SceneBuffer,
     render_texture: crate::bindings::cuda::Texture,
     render_data_texture: crate::bindings::cuda::RenderDataTexture,
-    environment_texture: crate::bindings::cuda::Texture,
 }
 
 #[derive(Default)]
@@ -321,7 +320,23 @@ fn render(
     };
 
     let scene = crate::bindings::cuda::SceneBuffer {
-        sun_direction: Vec3::new(1.0f32, -1.0f32, 1.0f32).normalize().as_ref().clone(),
+        sun: crate::bindings::cuda::SunLight {
+            direction: Vec3::new(1.0f32, -1.0f32, 1.0f32).normalize().as_ref().clone(),
+            color: Vec3::new(1.0f32, 1.0f32, 1.0f32).as_ref().clone(),
+            intensity: 20.0f32,
+        },
+        point_lights: [crate::bindings::cuda::PointLight {
+            position: Vec3::ZERO.as_ref().clone(),
+            color: Vec3::ZERO.as_ref().clone(),
+            intensity: 0.0f32,
+        }; 8],
+        point_light_count: 0,
+        environment_texture: crate::bindings::cuda::Texture {
+            texture: unsafe {
+                std::mem::transmute(*(&render_buffers.environment_texture_buffer).device_ptr())
+            },
+            size: [render_buffers.environment_texture_buffer_size[0] as _, render_buffers.environment_texture_buffer_size[1] as _],
+        },
     };
 
     let render_texture = crate::bindings::cuda::Texture {
@@ -338,20 +353,12 @@ fn render(
         size: [render_buffers.render_data_texture_buffer_size[0] as _, render_buffers.render_data_texture_buffer_size[1] as _],
     };
 
-    let environment_texture = crate::bindings::cuda::Texture {
-        texture: unsafe {
-            std::mem::transmute(*(&render_buffers.environment_texture_buffer).device_ptr())
-        },
-        size: [render_buffers.environment_texture_buffer_size[0] as _, render_buffers.environment_texture_buffer_size[1] as _],
-    };
-
     let parameters = RenderParameters {
         camera,
         globals,
         scene,
         render_data_texture,
         render_texture,
-        environment_texture,
     };
 
     //
@@ -380,7 +387,6 @@ fn render(
                         render_parameters.globals.clone(),
                         render_parameters.camera.clone(),
                         render_parameters.scene.clone(),
-                        render_parameters.environment_texture.clone()
                     ),
                 )
                 .unwrap()

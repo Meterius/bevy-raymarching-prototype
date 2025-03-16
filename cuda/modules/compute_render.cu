@@ -4,8 +4,7 @@ extern "C" __global__ void compute_render(
     const RenderDataTexture render_data_texture,
     const GlobalsBuffer globals,
     const CameraBuffer camera,
-    const SceneBuffer scene,
-    const Texture environment
+    const SceneBuffer scene
 ) {
     // calculate ray
 
@@ -38,7 +37,11 @@ extern "C" __global__ void compute_render(
     // ray march and fill preliminary values in render data texture
 
     DefaultSignedDistanceScene sd_scene;
-    RayRender ray_render = render_ray(ray, scene, sd_scene, environment);
+    const RayRenderParameters parameters {
+        scene, sd_scene,
+    };
+
+    RayRender ray_render = render_ray(parameters, ray);
 
     render_data_texture.texture[texture_index] = {
         ray_render.hit.depth,
