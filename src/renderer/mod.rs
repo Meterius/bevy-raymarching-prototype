@@ -319,18 +319,27 @@ fn render(
         },
     };
 
+    let mut point_lights = [crate::bindings::cuda::PointLight {
+        position: Vec3::ZERO.as_ref().clone(),
+        color: Vec3::ZERO.as_ref().clone(),
+        intensity: 0.0f32,
+    }; crate::bindings::cuda::MAX_POINT_LIGHT_COUNT as usize];
+    let point_light_count = 1;
+
+    point_lights[0] = crate::bindings::cuda::PointLight {
+        position: Vec3::new(3.0f32, 2.0f32, -5.0f32).as_ref().clone(),
+        color: Vec3::new(1.0f32, 0.0f32, 0.0f32).as_ref().clone(),
+        intensity: 15.0f32,
+    };
+
     let scene = crate::bindings::cuda::SceneBuffer {
         sun: crate::bindings::cuda::SunLight {
             direction: Vec3::new(1.0f32, -1.0f32, 1.0f32).normalize().as_ref().clone(),
             color: Vec3::new(1.0f32, 1.0f32, 1.0f32).as_ref().clone(),
-            intensity: 20.0f32,
+            intensity: 2.0f32,
         },
-        point_lights: [crate::bindings::cuda::PointLight {
-            position: Vec3::ZERO.as_ref().clone(),
-            color: Vec3::ZERO.as_ref().clone(),
-            intensity: 0.0f32,
-        }; 8],
-        point_light_count: 0,
+        point_lights,
+        point_light_count,
         environment_texture: crate::bindings::cuda::Texture {
             texture: unsafe {
                 std::mem::transmute(*(&render_buffers.environment_texture_buffer).device_ptr())

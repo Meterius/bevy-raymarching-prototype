@@ -90,18 +90,40 @@ __device__ float ray_march_ambient_occlusion(
 
 __device__ RayMarchHit ray_march(
     const SignedDistanceScene& scene,
-    const Ray ray
+    const Ray ray,
+    const float depth_limit,
+    const bool self_collision_avoidance
 ) {
     RayMarchHit hit {
         (int) 0,
-        ray.origin + ray.direction,
+        ray.origin,
         0,
         StepLimit,
         clock64()
     };
 
+    if (self_collision_avoidance) {
+        for (; hit.steps < RAY_MARCH_STEP_LIMIT; hit.steps++) {
+            float sd = scene.distance(hit.position);
+            float d = min(max(-min(0.0f, sd), 2.0f * RAY_MARCH_COLLISION_DISTANCE), depth_limit - hit.depth);
+
+            if (sd > RAY_MARCH_COLLISION_DISTANCE) {
+                break;
+            }
+
+            hit.depth += d;
+            hit.position += d * ray.direction;
+
+            if (hit.depth >= depth_limit) {
+                hit.outcome = DepthLimit;
+                break;
+            }
+        }
+    }
+
     for (; hit.steps < RAY_MARCH_STEP_LIMIT; hit.steps++) {
-        float d = scene.distance(hit.position);
+        float d = max(0.0f, min(scene.distance(hit.position), depth_limit - hit.depth));
+
         hit.depth += d;
         hit.position += d * ray.direction;
 
@@ -110,7 +132,7 @@ __device__ RayMarchHit ray_march(
             break;
         }
 
-        if (hit.depth > RAY_MARCH_DEPTH_LIMIT) {
+        if (hit.depth >= depth_limit) {
             hit.outcome = DepthLimit;
             break;
         }
